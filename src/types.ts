@@ -1,4 +1,4 @@
-export type ArticleStatus = "queued" | "published" | "draft" | "unset";
+export type ArticleStatus = "queued" | "review" | "published" | "draft" | "unset";
 
 export interface ArticleStatusEntry {
   status: ArticleStatus;

@@ -1,6 +1,6 @@
 import type { ArticlePath, ArticleStatusEntry, StatusDocument } from "./types";
 
-const VALID_STATUSES = new Set(["queued", "published", "draft", "unset"]);
+const VALID_STATUSES = new Set(["queued", "review", "published", "draft", "unset"]);
 
 export function emptyStatusEntry(status: ArticleStatusEntry["status"] = "unset"): ArticleStatusEntry {
   return { status, publishedUrl: null, publishedAt: null };
@@ -72,10 +72,11 @@ export function mergeArticlePaths(paths: string[], status: StatusDocument): {
   const orphanStatusPaths = Object.keys(status.articles).filter((path) => !pathSet.has(path));
 
   const articles = paths.map((path) => {
-    const entry = status.articles[path] ?? emptyStatusEntry();
+    const category = path.split("/", 1)[0];
+    const entry = status.articles[path] ?? emptyStatusEntry(category === "disney" ? "review" : "queued");
     return {
       path,
-      category: path.split("/", 1)[0],
+      category,
       status: entry.status,
       queueOrder: entry.queueOrder,
       publishedUrl: entry.publishedUrl,
@@ -84,7 +85,7 @@ export function mergeArticlePaths(paths: string[], status: StatusDocument): {
   });
 
   articles.sort((left, right) => {
-    if (left.category === "design" && right.category === "design") {
+    if (left.category === right.category) {
       return (left.queueOrder ?? Number.MAX_SAFE_INTEGER) - (right.queueOrder ?? Number.MAX_SAFE_INTEGER) || left.path.localeCompare(right.path, "ja");
     }
     return left.path.localeCompare(right.path, "ja");

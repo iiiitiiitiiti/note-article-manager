@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { buildStatusDocument, parseDesignQueue } from "../scripts/init-status.mjs";
+import { buildStatusDocument, extractFilenameOrder, parseDesignQueue, parseDisneyReviewStatuses } from "../scripts/init-status.mjs";
 
 test("parseDesignQueue validates order and filename numbers", () => {
   const queue = parseDesignQueue([
@@ -17,13 +17,31 @@ test("parseDesignQueue validates order and filename numbers", () => {
   assert.throws(() => parseDesignQueue("1. [02_two.md](design/02_two.md)"), /一致しません/);
 });
 
-test("buildStatusDocument includes only article Markdown and initializes statuses", () => {
+test("extractFilenameOrder and parseDisneyReviewStatuses derive publication and review state", () => {
+  assert.equal(extractFilenameOrder("design/03_three.md"), 3);
+  assert.equal(extractFilenameOrder("essay/日記.md"), undefined);
+  assert.deepEqual([...parseDisneyReviewStatuses([
+    "### 01 一つ目",
+    "**完成・ユーザーレビュー通過**（`01_one.md`）",
+    "### 02 二つ目",
+    "**完成・ユーザーレビュー待ち**（`02_two.md`）",
+  ].join("\n")).entries()], [
+    ["disney/01_one.md", "queued"],
+    ["disney/02_two.md", "review"],
+  ]);
+});
+
+test("buildStatusDocument initializes every article and preserves published state", () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "note-article-manager-"));
   mkdirSync(join(repoRoot, "design"));
+  mkdirSync(join(repoRoot, "disney"));
   mkdirSync(join(repoRoot, "essay"));
   mkdirSync(join(repoRoot, "_docs"));
   writeFileSync(join(repoRoot, "README.md"), "1. [01_one.md](design/01_one.md)\n");
   writeFileSync(join(repoRoot, "design/01_one.md"), "# One\n");
+  writeFileSync(join(repoRoot, "disney/01_one.md"), "# One\n");
+  writeFileSync(join(repoRoot, "disney/02_two.md"), "# Two\n");
+  writeFileSync(join(repoRoot, "disney/IDEAS.md"), "### 01 一つ目\n**完成・ユーザーレビュー通過**（`01_one.md`）\n### 02 二つ目\n**完成・ユーザーレビュー待ち**（`02_two.md`）\n");
   writeFileSync(join(repoRoot, "essay/日記.md"), "# 日記\n");
   writeFileSync(join(repoRoot, "_docs/plan.md"), "# Excluded\n");
 
@@ -31,7 +49,16 @@ test("buildStatusDocument includes only article Markdown and initializes statuse
     schemaVersion: 1,
     articles: {
       "design/01_one.md": { status: "queued", queueOrder: 1, publishedUrl: null, publishedAt: null },
-      "essay/日記.md": { status: "unset", publishedUrl: null, publishedAt: null },
+      "disney/01_one.md": { status: "queued", queueOrder: 1, publishedUrl: null, publishedAt: null },
+      "disney/02_two.md": { status: "review", queueOrder: 2, publishedUrl: null, publishedAt: null },
+      "essay/日記.md": { status: "queued", publishedUrl: null, publishedAt: null },
     },
   });
+
+  assert.equal(buildStatusDocument(repoRoot, {
+    schemaVersion: 1,
+    articles: {
+      "essay/日記.md": { status: "published", publishedUrl: "https://note.com/example", publishedAt: "2026-07-18T00:00:00.000Z" },
+    },
+  }).articles["essay/日記.md"].status, "published");
 });

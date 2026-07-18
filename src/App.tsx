@@ -195,7 +195,7 @@ function RepositoryWarnings({ snapshot }: { snapshot: RepositorySnapshot }) {
   return (
     <aside className="warning-panel" role="status">
       <strong>status.json と記事ツリーに差分があります。</strong>
-      {snapshot.missingStatusPaths.length > 0 && <p>新規記事（未設定として表示）: {snapshot.missingStatusPaths.length} 件</p>}
+      {snapshot.missingStatusPaths.length > 0 && <p>新規記事（公開待ち／Disneyはレビュー待ちとして仮表示）: {snapshot.missingStatusPaths.length} 件</p>}
       {snapshot.orphanStatusPaths.length > 0 && <p>孤児エントリ（自動削除していません）: {snapshot.orphanStatusPaths.length} 件</p>}
     </aside>
   );
@@ -206,7 +206,7 @@ function ArticleListItem({ article, onOpen }: { article: ArticlePath; onOpen: (p
   return (
     <button className="article-row" type="button" onClick={() => void onOpen(article.path)}>
       <span className="article-row-main">
-        <span className="article-row-title">{article.category === "design" && article.queueOrder ? `${String(article.queueOrder).padStart(2, "0")} ` : ""}{filename.replace(/^\d+[_-]?/, "").replace(/[_-]+/g, " ")}</span>
+        <span className="article-row-title">{article.queueOrder ? `${String(article.queueOrder).padStart(2, "0")} ` : ""}{filename.replace(/^\d+[_-]?/, "").replace(/[_-]+/g, " ")}</span>
         <span className="article-row-path">{article.path}</span>
       </span>
       <StatusBadge status={article.status} />
@@ -315,7 +315,7 @@ function ManualCopy({ label, text, onClose }: { label: string; text: string; onC
 }
 
 function StatusBadge({ status }: { status: ArticlePath["status"] }) {
-  const labels = { queued: "公開待ち", published: "公開済み", draft: "執筆中", unset: "未設定" };
+  const labels = { queued: "公開待ち", review: "レビュー待ち", published: "公開済み", draft: "執筆中", unset: "未設定" };
   return <span className={`status-badge status-${status}`}>{labels[status]}</span>;
 }
 
