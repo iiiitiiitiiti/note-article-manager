@@ -275,7 +275,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             <div className="transfer-actions">
               <button className="primary-button" type="button" onClick={() => copy("タイトル", article.title)}>タイトルをコピー</button>
               <button className="secondary-button" type="button" onClick={() => copy("本文", article.body)}>本文をコピー</button>
-              <a className="secondary-button" href="https://note.com/notes/new" onClick={onPrepareNoteNavigation}>note で開く</a>
+              <a className="secondary-button" href="https://note.com/intent/post" onClick={onPrepareNoteNavigation}>note で開く</a>
             </div>
             {message && <p className="inline-message" role="status">{message}</p>}
             {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} />}
