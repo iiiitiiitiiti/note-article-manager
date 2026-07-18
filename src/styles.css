@@ -37,6 +37,7 @@ h2 { font-size: 1.05rem; }
 .article-row-path { display: block; overflow: hidden; color: #78827a; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
 .status-badge, .warning-badge { display: inline-block; flex: 0 0 auto; border-radius: 999px; padding: 3px 8px; font-size: .72rem; font-weight: 700; white-space: nowrap; }
 .status-queued { background: #e5f0e7; color: #23633e; }
+.status-review { background: #fff0dc; color: #98551e; }
 .status-published { background: #173f35; color: #fff; }
 .status-draft { background: #f6e8d5; color: #8a4d1e; }
 .status-unset { background: #e9e7e1; color: #70746f; }

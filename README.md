@@ -13,7 +13,8 @@ npm run dev
 
 ## 主な機能
 
-- `design/` は `status.json` の `queueOrder` 順、それ以外はフォルダ別に一覧表示
+- 記事はカテゴリ別に一覧表示し、数字付きファイルは接頭辞の数字順に並べる
+- 公開状態は、通常記事が「公開待ち」、Disney記事が `IDEAS.md` のレビュー状態に応じて「公開待ち／レビュー待ち」になる
 - 記事を開いたときだけ Markdown 本文を取得
 - タイトルと本文を別々にクリップボードへコピー
 - コピーに失敗したときは選択可能なテキストエリアへフォールバック
@@ -29,7 +30,7 @@ node scripts/init-status.mjs \
   --repo /path/to/note-articles
 ```
 
-スクリプトは `README.md` の design キューと実ファイルを照合します。`_docs/`、`assets/`、ルートの README、`disney/IDEAS.md` は記事として扱いません。既存の `status.json` は `--force` を指定しない限り上書きしません。
+スクリプトは `README.md` の design キュー、各記事ファイルの接頭辞番号、`disney/IDEAS.md` のレビュー状態を照合します。`_docs/`、`assets/`、ルートの README、`disney/IDEAS.md` は記事として扱いません。既存の `published` と `draft` は再生成時も保持し、`queued`・`review`・`unset` は現在のルールから再計算します。既存の `status.json` は `--force` を指定しない限り上書きしません。
 
 ## 検証
 
