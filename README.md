@@ -20,6 +20,7 @@ npm run dev
 - 生成用プロンプトをコピーし、用意した画像を記事リポジトリへ登録して本文へ差し込み
 - タイトルと本文を別々にクリップボードへコピー
 - コピーに失敗したときは選択可能なテキストエリアへフォールバック
+- 手動コピー後もnote執筆画面へ移動できる
 - note の公開 URL を入力して、1記事分だけ `status.json` を GitHub へ書き戻し
 - ETag キャッシュと Contents API の SHA を分離して扱い、409 競合時は最新状態へ変更意図を再適用
 
@@ -44,7 +45,7 @@ npm run lint
 npm run build
 ```
 
-iPhone Safari のクリップボード、note アプリへの遷移、note 側の Markdown 貼り付け変換は実機での確認が必要です。GitHub API への実データ書き込みも、fine-grained PAT を設定した端末で確認してください。
+iPhone Safari とホーム画面に追加したPWAの実機確認は、[iPhone実機E2Eチェックリスト](docs/iphone-e2e-checklist.md)に沿って行います。クリップボード、note アプリへの遷移、note 側の Markdown 貼り付け変換、GitHub APIへの実データ書き込みは、fine-grained PATを設定した端末で確認してください。
 
 ## セキュリティ上の前提
 
