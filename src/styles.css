@@ -30,9 +30,9 @@ h2 { font-size: 1.05rem; }
 .category-tab span { margin-left: 6px; color: #9a9f9b; font-size: .8rem; }
 .category-tab.active { border-color: #173f35; background: #173f35; color: #fff; }
 .article-list { display: grid; min-width: 0; gap: 10px; padding-top: 16px; }
-.article-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; border: 1px solid #e0ddd4; border-radius: 14px; padding: 14px 15px; background: #fffdf8; color: #173f35; text-align: left; transition: transform .12s ease, border-color .12s ease; }
+.article-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-width: 0; max-width: 100%; border: 1px solid #e0ddd4; border-radius: 14px; padding: 14px 15px; background: #fffdf8; color: #173f35; text-align: left; transition: transform .12s ease, border-color .12s ease; }
 .article-row:hover, .article-row:focus-visible { border-color: #b35d38; transform: translateY(-1px); }
-.article-row-main { min-width: 0; flex: 1 1 auto; }
+.article-row-main { min-width: 0; flex: 1 1 auto; overflow: hidden; }
 .article-row-title { display: block; overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .article-row-path { display: block; overflow: hidden; color: #78827a; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
 .status-badge, .warning-badge { display: inline-block; flex: 0 0 auto; border-radius: 999px; padding: 3px 8px; font-size: .72rem; font-weight: 700; white-space: nowrap; }
