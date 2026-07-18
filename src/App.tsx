@@ -365,9 +365,10 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             {article.warnings.length > 0 && <ul className="warning-list">{article.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
           </section>
 
-          <section className="image-plan-card">
-            <h2>画像の準備</h2>
-            <p className="image-plan-intro">画像ごとに、AIで生成するか、自分で用意するか、不要かを管理できます。</p>
+          <details className="image-plan-card">
+            <summary>画像の準備</summary>
+            <div className="image-plan-content">
+              <p className="image-plan-intro">画像ごとに、AIで生成するか、自分で用意するか、不要かを管理できます。</p>
             {article.imagePlaceholders.length === 0 && <p className="empty-state">画像プレースホルダーはありません。</p>}
             {article.imagePlaceholders.map((placeholder, index) => {
               const state = getImageTaskState(imageStatus, selectedPath, placeholder.id);
@@ -389,7 +390,8 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
                 </div>
               );
             })}
-          </section>
+            </div>
+          </details>
 
           <section className="publish-card">
             <h2>公開状況</h2>

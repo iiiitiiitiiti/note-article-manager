@@ -70,7 +70,10 @@ input:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3p
 .manual-copy textarea { min-height: 180px; margin-top: 10px; font-size: .86rem; line-height: 1.55; }
 .manual-copy p { margin: 8px 0 0; color: #79521e; font-size: .8rem; }
 .image-plan-card { margin: 24px 0; border: 1px solid #dedbd2; border-radius: 14px; padding: 14px 16px; background: #fffdf8; }
-.image-plan-card h2 { margin-bottom: 4px; }
+.image-plan-card summary { cursor: pointer; font-size: 1.05rem; font-weight: 700; }
+.image-plan-card summary:focus-visible { outline: 3px solid rgba(179, 93, 56, .3); outline-offset: 3px; }
+.image-plan-card[open] summary { margin-bottom: 10px; }
+.image-plan-content { min-width: 0; }
 .image-plan-intro { color: #637068; font-size: .9rem; }
 .image-task { margin-top: 14px; border-top: 1px solid #e5e1d8; padding-top: 14px; }
 .image-task-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
