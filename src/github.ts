@@ -71,18 +71,23 @@ export class GithubClient {
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) {
       throw new Error("画像は1バイト以上、5MB以下にしてください。");
     }
-    const response = await this.request<ContentsResponse>(
-      `/repos/${OWNER}/${REPOSITORY}/contents/${encodePath(path)}`,
-      {
+    const endpoint = `/repos/${OWNER}/${REPOSITORY}/contents/${encodePath(path)}`;
+    const content = encodeBase64Bytes(bytes);
+    for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt += 1) {
+      const existing = await this.request<ContentsResponse>(`${endpoint}?ref=${BRANCH}`, {}, undefined, [404]);
+      const response = await this.request<ContentsResponse>(endpoint, {
         method: "PUT",
         body: JSON.stringify({
           message: `image: add ${path}`,
-          content: encodeBase64Bytes(bytes),
+          content,
+          ...(existing.status === 200 ? { sha: existing.data.sha } : {}),
           branch: BRANCH,
         }),
-      },
-    );
-    if (response.status !== 200 && response.status !== 201) throw new Error(`画像のアップロードに失敗しました (${response.status})`);
+      });
+      if (response.status === 200 || response.status === 201) return;
+      if (response.status !== 409 || attempt === MAX_WRITE_ATTEMPTS) break;
+    }
+    throw new Error("画像が別端末で更新されたため、アップロードを中止しました。再試行してください。");
   }
 
   public updateArticleStatus(
