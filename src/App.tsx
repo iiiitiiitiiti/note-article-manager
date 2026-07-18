@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { GithubClient } from "./github";
 import { bodyForNote, renderArticle } from "./markdown";
-import { clearToken, loadToken, saveToken } from "./storage";
+import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadToken, saveArticleReturnPath, saveToken } from "./storage";
 import type { ArticleContent, ArticlePath, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -16,6 +16,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 export default function App() {
   const [token, setToken] = useState(loadToken);
   const [showSettings, setShowSettings] = useState(!token);
+  const [returnPath, setReturnPath] = useState(loadArticleReturnPath);
   const [snapshot, setSnapshot] = useState<RepositorySnapshot | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("design");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -58,6 +59,13 @@ export default function App() {
     }
   }, [client]);
 
+  useEffect(() => {
+    if (!returnPath || !client || showSettings) return;
+    clearArticleReturnPath();
+    setReturnPath("");
+    void openArticle(returnPath);
+  }, [client, openArticle, returnPath, showSettings]);
+
   const handleTokenSave = (nextToken: string) => {
     saveToken(nextToken);
     setToken(nextToken.trim());
@@ -69,6 +77,7 @@ export default function App() {
 
   const handleTokenClear = () => {
     clearToken();
+    clearArticleReturnPath();
     setToken("");
     setShowSettings(true);
     setSnapshot(null);
@@ -77,10 +86,10 @@ export default function App() {
   };
 
   if (showSettings || !token) {
-    return <SettingsScreen hasToken={Boolean(token)} onSave={handleTokenSave} onClear={handleTokenClear} />;
+    return <SettingsScreen hasToken={Boolean(token)} onSave={handleTokenSave} onResume={() => setShowSettings(false)} onClear={handleTokenClear} />;
   }
   if (!client) {
-    return <SettingsScreen hasToken={false} onSave={handleTokenSave} onClear={handleTokenClear} />;
+    return <SettingsScreen hasToken={false} onSave={handleTokenSave} onResume={() => setShowSettings(false)} onClear={handleTokenClear} />;
   }
 
   if (selectedPath && (article || articleLoading)) {
@@ -91,7 +100,8 @@ export default function App() {
         selectedPath={selectedPath}
         currentStatus={snapshot?.articles.find((item) => item.path === selectedPath)}
         client={client}
-        onBack={() => { setSelectedPath(null); setArticle(null); setError(""); }}
+        onBack={() => { clearArticleReturnPath(); setSelectedPath(null); setArticle(null); setError(""); }}
+        onPrepareNoteNavigation={() => saveArticleReturnPath(selectedPath)}
         onSaved={async (updatedStatus) => {
           setSnapshot((current) => current ? {
             ...current,
@@ -153,7 +163,7 @@ export default function App() {
   );
 }
 
-function SettingsScreen({ hasToken, onSave, onClear }: { hasToken: boolean; onSave: (token: string) => void; onClear: () => void }) {
+function SettingsScreen({ hasToken, onSave, onResume, onClear }: { hasToken: boolean; onSave: (token: string) => void; onResume: () => void; onClear: () => void }) {
   const [value, setValue] = useState("");
   const canSave = value.trim().length > 0;
   return (
@@ -166,6 +176,7 @@ function SettingsScreen({ hasToken, onSave, onClear }: { hasToken: boolean; onSa
         <label htmlFor="pat">Personal access token</label>
         <input id="pat" type="password" value={value} onChange={(event) => setValue(event.target.value)} autoComplete="off" placeholder={hasToken ? "再入力する場合だけ入力" : "github_pat_…"} />
         <button className="primary-button" type="button" disabled={!canSave} onClick={() => onSave(value)}>この端末に保存して接続</button>
+        {hasToken && <button className="secondary-button settings-resume-button" type="button" onClick={onResume}>保存済みトークンで一覧に戻る</button>}
         <ul className="fine-print">
           <li>Contents の read/write だけを許可した有効期限つき PAT を使ってください。</li>
           <li>トークンは URL・ログ・GitHub Pages の公開ファイルには出しません。</li>
@@ -201,13 +212,14 @@ function ArticleListItem({ article, onOpen }: { article: ArticlePath; onOpen: (p
   );
 }
 
-function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, client, onBack, onSaved, error }: {
+function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, client, onBack, onPrepareNoteNavigation, onSaved, error }: {
   article: ArticleContent | null;
   articleLoading: boolean;
   selectedPath: string;
   currentStatus?: ArticlePath;
   client: GithubClient;
   onBack: () => void;
+  onPrepareNoteNavigation: () => void;
   onSaved: (document: RepositorySnapshot["status"]) => void;
   error: string;
 }) {
@@ -263,7 +275,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             <div className="transfer-actions">
               <button className="primary-button" type="button" onClick={() => copy("タイトル", article.title)}>タイトルをコピー</button>
               <button className="secondary-button" type="button" onClick={() => copy("本文", article.body)}>本文をコピー</button>
-              <button className="secondary-button" type="button" onClick={() => window.open("https://note.com/notes/new", "_blank", "noopener,noreferrer")}>note で開く</button>
+              <a className="secondary-button" href="https://note.com/notes/new" onClick={onPrepareNoteNavigation}>note で開く</a>
             </div>
             {message && <p className="inline-message" role="status">{message}</p>}
             {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} />}
