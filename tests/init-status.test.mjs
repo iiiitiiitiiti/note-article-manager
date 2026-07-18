@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { buildStatusDocument, extractFilenameOrder, parseDesignQueue, parseDisneyReviewStatuses } from "../scripts/init-status.mjs";
+import { buildImageStatusDocument, parseImagePlaceholders } from "../scripts/init-image-status.mjs";
 
 test("parseDesignQueue validates order and filename numbers", () => {
   const queue = parseDesignQueue([
@@ -61,4 +62,34 @@ test("buildStatusDocument initializes every article and preserves published stat
       "essay/日記.md": { status: "published", publishedUrl: "https://note.com/example", publishedAt: "2026-07-18T00:00:00.000Z" },
     },
   }).articles["essay/日記.md"].status, "published");
+});
+
+test("image placeholders become stable tasks and preserve decisions", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "note-article-manager-images-"));
+  mkdirSync(join(repoRoot, "design"));
+  writeFileSync(join(repoRoot, "design/01_one.md"), "# One\n\n【画像①: 見出し画像】\n\n【画像プレースホルダー（任意）：補足図】\n");
+  const placeholders = parseImagePlaceholders(readFileSync(join(repoRoot, "design/01_one.md"), "utf8"));
+  assert.equal(placeholders.length, 2);
+  assert.equal(placeholders[0].description, "見出し画像");
+  const previous = {
+    schemaVersion: 1,
+    articles: {
+      "design/01_one.md": {
+        tasks: {
+          [placeholders[0].id]: { decision: "generate", assetPath: "design/images/one.png", updatedAt: "2026-07-18T00:00:00.000Z" },
+        },
+      },
+    },
+  };
+  assert.deepEqual(buildImageStatusDocument(repoRoot, previous), {
+    schemaVersion: 1,
+    articles: {
+      "design/01_one.md": {
+        tasks: {
+          [placeholders[0].id]: { decision: "generate", assetPath: "design/images/one.png", updatedAt: "2026-07-18T00:00:00.000Z" },
+          [placeholders[1].id]: { decision: "pending", assetPath: null, updatedAt: null },
+        },
+      },
+    },
+  });
 });

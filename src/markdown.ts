@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import { extractLocalImagePaths, parseImagePlaceholders, replaceLocalImageSources } from "./image-plan";
 import type { ArticleContent } from "./types";
 
 const FRONT_MATTER = /^\uFEFF?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)\r?\n/;
@@ -52,19 +53,28 @@ export function getNoteWarnings(markdown: string): string[] {
   return warnings;
 }
 
-export function renderArticle(markdown: string, filePath: string): ArticleContent {
+export function renderArticle(markdown: string, filePath: string, imageSources: Record<string, string> = {}): ArticleContent {
   const title = extractTitle(markdown, filePath);
   const body = bodyForNote(markdown);
+  const renderedMarkdown = replaceLocalImageSources(markdown, filePath, imageSources);
   const renderer = new marked.Renderer();
   renderer.html = () => "";
-  const rawHtml = marked.parse(removeFrontMatter(markdown), { renderer, gfm: true, async: false }) as string;
+  const rawHtml = marked.parse(removeFrontMatter(renderedMarkdown), { renderer, gfm: true, async: false }) as string;
   const renderedHtml = DOMPurify.sanitize(rawHtml, {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
     FORBID_ATTR: ["style", "onerror", "onclick"],
   });
 
-  return { path: filePath, title, body, renderedHtml, warnings: getNoteWarnings(markdown) };
+  return {
+    path: filePath,
+    title,
+    body,
+    renderedHtml,
+    warnings: getNoteWarnings(markdown),
+    imagePlaceholders: parseImagePlaceholders(markdown),
+    localImagePaths: extractLocalImagePaths(markdown, filePath),
+  };
 }
 
 function filenameTitle(filePath: string): string {
