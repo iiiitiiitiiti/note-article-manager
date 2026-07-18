@@ -251,28 +251,32 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   onArticleUpdated: () => void;
   error: string;
 }) {
-  const [manualCopy, setManualCopy] = useState<{ label: string; text: string } | null>(null);
+  const [manualCopy, setManualCopy] = useState<{ label: string; text: string; openNoteAfterCopy: boolean } | null>(null);
   const [message, setMessage] = useState("");
   const [publishedUrl, setPublishedUrl] = useState(currentStatus?.publishedUrl ?? "");
   const [saving, setSaving] = useState(false);
   const [imageBusy, setImageBusy] = useState("");
 
+  const openNote = () => {
+    onPrepareNoteNavigation();
+    window.location.assign(NOTE_COMPOSE_URL);
+  };
+
   const copy = (label: string, text: string, openNoteAfterCopy = false) => {
     setMessage("");
     setManualCopy(null);
     if (!navigator.clipboard?.writeText) {
-      setManualCopy({ label, text });
+      setManualCopy({ label, text, openNoteAfterCopy });
       return;
     }
     void navigator.clipboard.writeText(text).then(
       () => {
         setMessage(`${label}をコピーしました。`);
         if (openNoteAfterCopy) {
-          onPrepareNoteNavigation();
-          window.location.assign(NOTE_COMPOSE_URL);
+          openNote();
         }
       },
-      () => setManualCopy({ label, text }),
+      () => setManualCopy({ label, text, openNoteAfterCopy }),
     );
   };
 
@@ -361,7 +365,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
               <button className="secondary-button" type="button" onClick={() => copy("本文", article.body, true)}>本文をコピー</button>
             </div>
             {message && <p className="inline-message" role="status">{message}</p>}
-            {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} />}
+            {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} onOpenNote={manualCopy.openNoteAfterCopy ? openNote : undefined} />}
             {article.warnings.length > 0 && <ul className="warning-list">{article.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
           </section>
 
@@ -411,10 +415,16 @@ function buildImagePrompt(articleTitle: string, description: string): string {
   return `note記事「${articleTitle}」の本文画像を作成してください。\n\n画像の内容：${description}\n\n記事の雰囲気に合う、説明的で落ち着いた構図。文字を画像内に入れる場合は日本語を正確に表示し、権利上問題のある既存画像の転載や、実在人物・施設の誤認を招く表現は避けてください。`;
 }
 
-function ManualCopy({ label, text, onClose }: { label: string; text: string; onClose: () => void }) {
+function ManualCopy({ label, text, onClose, onOpenNote }: { label: string; text: string; onClose: () => void; onOpenNote?: () => void }) {
   return (
     <div className="manual-copy">
-      <div className="manual-copy-heading"><strong>{label}を手動コピー</strong><button type="button" onClick={onClose}>閉じる</button></div>
+      <div className="manual-copy-heading">
+        <strong>{label}を手動コピー</strong>
+        <div className="manual-copy-actions">
+          {onOpenNote && <button className="secondary-button" type="button" onClick={onOpenNote}>note執筆画面を開く</button>}
+          <button type="button" onClick={onClose}>閉じる</button>
+        </div>
+      </div>
       <textarea value={text} readOnly onFocus={(event) => event.currentTarget.select()} aria-label={`${label}の手動コピー用テキスト`} />
       <p>テキストエリアをタップして全選択し、コピーしてください。</p>
     </div>
