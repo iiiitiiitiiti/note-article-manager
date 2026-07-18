@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { GithubClient } from "./github";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
@@ -369,10 +369,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             {article.warnings.length > 0 && <ul className="warning-list">{article.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
           </section>
 
-          {article.imagePlaceholders.length > 0 && <details className="image-plan-card">
-            <summary>画像の準備</summary>
-            <div className="accordion-content">
-              <div className="accordion-content-inner image-plan-content">
+          {article.imagePlaceholders.length > 0 && <Accordion className="image-plan-card" label="画像の準備">
                 <p className="image-plan-intro">画像ごとに、AIで生成するか、自分で用意するか、不要かを管理できます。</p>
                 {article.imagePlaceholders.map((placeholder, index) => {
                   const state = getImageTaskState(imageStatus, selectedPath, placeholder.id);
@@ -394,25 +391,35 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          </details>}
+          </Accordion>}
 
-          <details className="publish-card">
-            <summary>公開状況</summary>
-            <div className="accordion-content">
-              <div className="accordion-content-inner publish-content">
-                <label htmlFor="published-url">公開済み note URL</label>
-                <input id="published-url" type="url" value={publishedUrl} onChange={(event) => setPublishedUrl(event.target.value)} placeholder="https://note.com/..." />
-                <button className="primary-button" type="button" disabled={saving || !isHttpUrl(publishedUrl)} onClick={() => void savePublished()}>{saving ? "保存中…" : "公開済みにする"}</button>
-              </div>
-            </div>
-          </details>
+          <Accordion className="publish-card" label="公開状況">
+            <label htmlFor="published-url">公開済み note URL</label>
+            <input id="published-url" type="url" value={publishedUrl} onChange={(event) => setPublishedUrl(event.target.value)} placeholder="https://note.com/..." />
+            <button className="primary-button" type="button" disabled={saving || !isHttpUrl(publishedUrl)} onClick={() => void savePublished()}>{saving ? "保存中…" : "公開済みにする"}</button>
+          </Accordion>
 
           <article className="markdown-preview" dangerouslySetInnerHTML={{ __html: article.renderedHtml }} />
         </>
       )}
     </main>
+  );
+}
+
+function Accordion({ className, label, children }: { className: string; label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const contentId = useId();
+  return (
+    <section className={`${className}${open ? " accordion-open" : ""}`}>
+      <h2 className="accordion-heading">
+        <button className="accordion-trigger" type="button" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen((current) => !current)}>
+          {label}
+        </button>
+      </h2>
+      <div id={contentId} className="accordion-content" aria-hidden={!open} inert={!open}>
+        <div className="accordion-content-inner">{children}</div>
+      </div>
+    </section>
   );
 }
 
