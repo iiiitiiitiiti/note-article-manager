@@ -369,40 +369,45 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             {article.warnings.length > 0 && <ul className="warning-list">{article.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
           </section>
 
-          <details className="image-plan-card">
+          {article.imagePlaceholders.length > 0 && <details className="image-plan-card">
             <summary>画像の準備</summary>
-            <div className="image-plan-content">
-              <p className="image-plan-intro">画像ごとに、AIで生成するか、自分で用意するか、不要かを管理できます。</p>
-            {article.imagePlaceholders.length === 0 && <p className="empty-state">画像プレースホルダーはありません。</p>}
-            {article.imagePlaceholders.map((placeholder, index) => {
-              const state = getImageTaskState(imageStatus, selectedPath, placeholder.id);
-              const busy = imageBusy === placeholder.id;
-              return (
-                <div className="image-task" key={placeholder.id}>
-                  <div className="image-task-heading">
-                    <strong>画像 {index + 1}{placeholder.optional ? "（任意）" : ""}</strong>
-                    <span className={`image-decision image-decision-${state.decision}`}>{IMAGE_DECISION_LABELS[state.decision]}</span>
-                  </div>
-                  <p>{placeholder.description}</p>
-                  <div className="image-decision-actions" role="group" aria-label={`画像${index + 1}の判断`}>
-                    {IMAGE_DECISIONS.map((item) => <button className={item.value === state.decision ? "image-decision-button active" : "image-decision-button"} type="button" key={item.value} disabled={busy} onClick={() => void saveImageDecision(placeholder.id, item.value)}>{item.label}</button>)}
-                  </div>
-                  {state.decision === "generate" && <button className="secondary-button image-prompt-button" type="button" disabled={busy} onClick={() => copy("画像生成用プロンプト", buildImagePrompt(article.title, placeholder.description))}>生成用プロンプトをコピー</button>}
-                  {state.assetPath && <p className="image-asset-path">登録済み: {state.assetPath}</p>}
-                  <label className="secondary-button image-upload-button" htmlFor={`${placeholder.id}-upload`}>{busy ? "登録中…" : "画像を登録"}</label>
-                  <input className="visually-hidden" id={`${placeholder.id}-upload`} type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void uploadImage(placeholder.id, file); }} />
-                </div>
-              );
-            })}
+            <div className="accordion-content">
+              <div className="accordion-content-inner image-plan-content">
+                <p className="image-plan-intro">画像ごとに、AIで生成するか、自分で用意するか、不要かを管理できます。</p>
+                {article.imagePlaceholders.map((placeholder, index) => {
+                  const state = getImageTaskState(imageStatus, selectedPath, placeholder.id);
+                  const busy = imageBusy === placeholder.id;
+                  return (
+                    <div className="image-task" key={placeholder.id}>
+                      <div className="image-task-heading">
+                        <strong>画像 {index + 1}{placeholder.optional ? "（任意）" : ""}</strong>
+                        <span className={`image-decision image-decision-${state.decision}`}>{IMAGE_DECISION_LABELS[state.decision]}</span>
+                      </div>
+                      <p>{placeholder.description}</p>
+                      <div className="image-decision-actions" role="group" aria-label={`画像${index + 1}の判断`}>
+                        {IMAGE_DECISIONS.map((item) => <button className={item.value === state.decision ? "image-decision-button active" : "image-decision-button"} type="button" key={item.value} disabled={busy} onClick={() => void saveImageDecision(placeholder.id, item.value)}>{item.label}</button>)}
+                      </div>
+                      {state.decision === "generate" && <button className="secondary-button image-prompt-button" type="button" disabled={busy} onClick={() => copy("画像生成用プロンプト", buildImagePrompt(article.title, placeholder.description))}>生成用プロンプトをコピー</button>}
+                      {state.assetPath && <p className="image-asset-path">登録済み: {state.assetPath}</p>}
+                      <label className="secondary-button image-upload-button" htmlFor={`${placeholder.id}-upload`}>{busy ? "登録中…" : "画像を登録"}</label>
+                      <input className="visually-hidden" id={`${placeholder.id}-upload`} type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void uploadImage(placeholder.id, file); }} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </details>}
+
+          <details className="publish-card">
+            <summary>公開状況</summary>
+            <div className="accordion-content">
+              <div className="accordion-content-inner publish-content">
+                <label htmlFor="published-url">公開済み note URL</label>
+                <input id="published-url" type="url" value={publishedUrl} onChange={(event) => setPublishedUrl(event.target.value)} placeholder="https://note.com/..." />
+                <button className="primary-button" type="button" disabled={saving || !isHttpUrl(publishedUrl)} onClick={() => void savePublished()}>{saving ? "保存中…" : "公開済みにする"}</button>
+              </div>
             </div>
           </details>
-
-          <section className="publish-card">
-            <h2>公開状況</h2>
-            <label htmlFor="published-url">公開済み note URL</label>
-            <input id="published-url" type="url" value={publishedUrl} onChange={(event) => setPublishedUrl(event.target.value)} placeholder="https://note.com/..." />
-            <button className="primary-button" type="button" disabled={saving || !isHttpUrl(publishedUrl)} onClick={() => void savePublished()}>{saving ? "保存中…" : "公開済みにする"}</button>
-          </section>
 
           <article className="markdown-preview" dangerouslySetInnerHTML={{ __html: article.renderedHtml }} />
         </>
