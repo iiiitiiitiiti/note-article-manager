@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { GithubClient } from "./github";
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadToken, saveArticleReturnPath, saveToken } from "./storage";
+
+const NOTE_COMPOSE_URL = "https://note.com/intent/post";
 import type { ArticleContent, ArticlePath, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -228,14 +230,21 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   const [publishedUrl, setPublishedUrl] = useState(currentStatus?.publishedUrl ?? "");
   const [saving, setSaving] = useState(false);
 
-  const copy = (label: string, text: string) => {
+  const copy = (label: string, text: string, openNoteAfterCopy = false) => {
     setMessage("");
+    setManualCopy(null);
     if (!navigator.clipboard?.writeText) {
       setManualCopy({ label, text });
       return;
     }
     void navigator.clipboard.writeText(text).then(
-      () => setMessage(`${label}をコピーしました。`),
+      () => {
+        setMessage(`${label}をコピーしました。`);
+        if (openNoteAfterCopy) {
+          onPrepareNoteNavigation();
+          window.location.assign(NOTE_COMPOSE_URL);
+        }
+      },
       () => setManualCopy({ label, text }),
     );
   };
@@ -273,9 +282,8 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             <div className="article-intro-line"><StatusBadge status={currentStatus?.status ?? "unset"} />{article.warnings.length > 0 && <span className="warning-badge">note 非対応要素あり</span>}</div>
             <h1>{article.title}</h1>
             <div className="transfer-actions">
-              <button className="primary-button" type="button" onClick={() => copy("タイトル", article.title)}>タイトルをコピー</button>
-              <button className="secondary-button" type="button" onClick={() => copy("本文", article.body)}>本文をコピー</button>
-              <a className="secondary-button" href="https://note.com/intent/post" onClick={onPrepareNoteNavigation}>note で開く</a>
+              <button className="primary-button" type="button" onClick={() => copy("タイトル", article.title, true)}>タイトルをコピー</button>
+              <button className="secondary-button" type="button" onClick={() => copy("本文", article.body, true)}>本文をコピー</button>
             </div>
             {message && <p className="inline-message" role="status">{message}</p>}
             {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} />}
