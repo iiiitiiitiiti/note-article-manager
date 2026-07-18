@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { GithubClient } from "./github";
+import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadToken, saveArticleReturnPath, saveToken } from "./storage";
 
 const NOTE_COMPOSE_URL = "https://note.com/intent/post";
-import type { ArticleContent, ArticlePath, RepositorySnapshot } from "./types";
+import type { ArticleContent, ArticlePath, ImageDecision, ImageStatusDocument, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   design: "design",
@@ -14,6 +15,15 @@ const CATEGORY_LABELS: Record<string, string> = {
   tools: "ツール",
   "web-review": "Webレビュー",
 };
+
+const IMAGE_DECISIONS: Array<{ value: ImageDecision; label: string }> = [
+  { value: "pending", label: "未決定" },
+  { value: "generate", label: "AIで生成" },
+  { value: "provide", label: "自分で用意" },
+  { value: "skip", label: "不要" },
+];
+
+const IMAGE_DECISION_LABELS: Record<ImageDecision, string> = Object.fromEntries(IMAGE_DECISIONS.map((item) => [item.value, item.label])) as Record<ImageDecision, string>;
 
 export default function App() {
   const [token, setToken] = useState(loadToken);
@@ -53,7 +63,17 @@ export default function App() {
     setError("");
     try {
       const markdown = await client.getArticle(path);
-      setArticle(renderArticle(markdown, path));
+      const initialArticle = renderArticle(markdown, path);
+      const imageResults = await Promise.allSettled(initialArticle.localImagePaths.map(async (imagePath) => [imagePath, await client.getImageDataUrl(imagePath)] as const));
+      const imageSources: Record<string, string> = {};
+      const unavailableImages: string[] = [];
+      for (const result of imageResults) {
+        if (result.status === "fulfilled") imageSources[result.value[0]] = result.value[1];
+        else unavailableImages.push(result.reason instanceof Error ? result.reason.message : "画像");
+      }
+      const nextArticle = renderArticle(markdown, path, imageSources);
+      if (unavailableImages.length > 0) nextArticle.warnings.push("一部の画像をプレビューできません。画像ファイルの形式・サイズ・PAT権限を確認してください。");
+      setArticle(nextArticle);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "記事本文の取得に失敗しました。");
     } finally {
@@ -102,8 +122,11 @@ export default function App() {
         selectedPath={selectedPath}
         currentStatus={snapshot?.articles.find((item) => item.path === selectedPath)}
         client={client}
+        imageStatus={snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }}
         onBack={() => { clearArticleReturnPath(); setSelectedPath(null); setArticle(null); setError(""); }}
         onPrepareNoteNavigation={() => saveArticleReturnPath(selectedPath)}
+        onImageStatusSaved={(imageStatus) => setSnapshot((current) => current ? { ...current, imageStatus } : current)}
+        onArticleUpdated={() => void openArticle(selectedPath)}
         onSaved={async (updatedStatus) => {
           setSnapshot((current) => current ? {
             ...current,
@@ -214,21 +237,25 @@ function ArticleListItem({ article, onOpen }: { article: ArticlePath; onOpen: (p
   );
 }
 
-function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, client, onBack, onPrepareNoteNavigation, onSaved, error }: {
+function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, client, imageStatus, onBack, onPrepareNoteNavigation, onSaved, onImageStatusSaved, onArticleUpdated, error }: {
   article: ArticleContent | null;
   articleLoading: boolean;
   selectedPath: string;
   currentStatus?: ArticlePath;
   client: GithubClient;
+  imageStatus: ImageStatusDocument;
   onBack: () => void;
   onPrepareNoteNavigation: () => void;
   onSaved: (document: RepositorySnapshot["status"]) => void;
+  onImageStatusSaved: (document: ImageStatusDocument) => void;
+  onArticleUpdated: () => void;
   error: string;
 }) {
   const [manualCopy, setManualCopy] = useState<{ label: string; text: string } | null>(null);
   const [message, setMessage] = useState("");
   const [publishedUrl, setPublishedUrl] = useState(currentStatus?.publishedUrl ?? "");
   const [saving, setSaving] = useState(false);
+  const [imageBusy, setImageBusy] = useState("");
 
   const copy = (label: string, text: string, openNoteAfterCopy = false) => {
     setMessage("");
@@ -268,6 +295,54 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
     }
   };
 
+  const saveImageDecision = async (taskId: string, decision: ImageDecision) => {
+    setImageBusy(taskId);
+    setMessage("");
+    try {
+      const updated = await client.updateImageTaskState(selectedPath, taskId, { decision, updatedAt: new Date().toISOString() });
+      onImageStatusSaved(updated);
+      setMessage(`画像の判断を「${IMAGE_DECISION_LABELS[decision]}」として保存しました。`);
+    } catch (saveError) {
+      setMessage(saveError instanceof Error ? saveError.message : "画像の判断の保存に失敗しました。");
+    } finally {
+      setImageBusy("");
+    }
+  };
+
+  const uploadImage = async (taskId: string, file: File) => {
+    const placeholder = article?.imagePlaceholders.find((item) => item.id === taskId);
+    if (!placeholder) return;
+    if (file.size === 0 || file.size > MAX_IMAGE_BYTES) {
+      setMessage("画像は1バイト以上、5MB以下にしてください。");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setMessage("画像ファイルを選択してください。");
+      return;
+    }
+    setImageBusy(taskId);
+    setMessage("");
+    try {
+      const assetPath = buildImageAssetPath(selectedPath, taskId, file.name);
+      await client.uploadImage(assetPath, new Uint8Array(await file.arrayBuffer()));
+      const assetName = assetPath.split("/images/").at(-1) ?? assetPath;
+      await client.updateArticleWithImage(selectedPath, taskId, `![${placeholder.description}](images/${assetName})`);
+      const currentState = getImageTaskState(imageStatus, selectedPath, taskId);
+      const updated = await client.updateImageTaskState(selectedPath, taskId, {
+        decision: currentState.decision === "pending" ? "provide" : currentState.decision,
+        assetPath,
+        updatedAt: new Date().toISOString(),
+      });
+      onImageStatusSaved(updated);
+      onArticleUpdated();
+      setMessage("画像を登録し、記事本文へ差し込みました。");
+    } catch (uploadError) {
+      setMessage(uploadError instanceof Error ? uploadError.message : "画像の登録に失敗しました。");
+    } finally {
+      setImageBusy("");
+    }
+  };
+
   return (
     <main className="app-shell">
       <header className="article-header">
@@ -290,6 +365,32 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             {article.warnings.length > 0 && <ul className="warning-list">{article.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
           </section>
 
+          <section className="image-plan-card">
+            <h2>画像の準備</h2>
+            <p className="image-plan-intro">画像ごとに、AIで生成するか、自分で用意するか、不要かを管理できます。</p>
+            {article.imagePlaceholders.length === 0 && <p className="empty-state">画像プレースホルダーはありません。</p>}
+            {article.imagePlaceholders.map((placeholder, index) => {
+              const state = getImageTaskState(imageStatus, selectedPath, placeholder.id);
+              const busy = imageBusy === placeholder.id;
+              return (
+                <div className="image-task" key={placeholder.id}>
+                  <div className="image-task-heading">
+                    <strong>画像 {index + 1}{placeholder.optional ? "（任意）" : ""}</strong>
+                    <span className={`image-decision image-decision-${state.decision}`}>{IMAGE_DECISION_LABELS[state.decision]}</span>
+                  </div>
+                  <p>{placeholder.description}</p>
+                  <div className="image-decision-actions" role="group" aria-label={`画像${index + 1}の判断`}>
+                    {IMAGE_DECISIONS.map((item) => <button className={item.value === state.decision ? "image-decision-button active" : "image-decision-button"} type="button" key={item.value} disabled={busy} onClick={() => void saveImageDecision(placeholder.id, item.value)}>{item.label}</button>)}
+                  </div>
+                  {state.decision === "generate" && <button className="secondary-button image-prompt-button" type="button" disabled={busy} onClick={() => copy("画像生成用プロンプト", buildImagePrompt(article.title, placeholder.description))}>生成用プロンプトをコピー</button>}
+                  {state.assetPath && <p className="image-asset-path">登録済み: {state.assetPath}</p>}
+                  <label className="secondary-button image-upload-button" htmlFor={`${placeholder.id}-upload`}>{busy ? "登録中…" : "画像を登録"}</label>
+                  <input className="visually-hidden" id={`${placeholder.id}-upload`} type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void uploadImage(placeholder.id, file); }} />
+                </div>
+              );
+            })}
+          </section>
+
           <section className="publish-card">
             <h2>公開状況</h2>
             <label htmlFor="published-url">公開済み note URL</label>
@@ -302,6 +403,10 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
       )}
     </main>
   );
+}
+
+function buildImagePrompt(articleTitle: string, description: string): string {
+  return `note記事「${articleTitle}」の本文画像を作成してください。\n\n画像の内容：${description}\n\n記事の雰囲気に合う、説明的で落ち着いた構図。文字を画像内に入れる場合は日本語を正確に表示し、権利上問題のある既存画像の転載や、実在人物・施設の誤認を招く表現は避けてください。`;
 }
 
 function ManualCopy({ label, text, onClose }: { label: string; text: string; onClose: () => void }) {

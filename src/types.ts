@@ -12,6 +12,23 @@ export interface StatusDocument {
   articles: Record<string, ArticleStatusEntry>;
 }
 
+export type ImageDecision = "pending" | "generate" | "provide" | "skip";
+
+export interface ImageTaskState {
+  decision: ImageDecision;
+  assetPath: string | null;
+  updatedAt: string | null;
+}
+
+export interface ImageStatusArticle {
+  tasks: Record<string, ImageTaskState>;
+}
+
+export interface ImageStatusDocument {
+  schemaVersion: 1;
+  articles: Record<string, ImageStatusArticle>;
+}
+
 export interface ArticlePath {
   path: string;
   category: string;
@@ -27,11 +44,23 @@ export interface ArticleContent {
   body: string;
   renderedHtml: string;
   warnings: string[];
+  imagePlaceholders: ImagePlaceholder[];
+  localImagePaths: string[];
+}
+
+export interface ImagePlaceholder {
+  id: string;
+  raw: string;
+  description: string;
+  optional: boolean;
+  start: number;
+  end: number;
 }
 
 export interface RepositorySnapshot {
   articles: ArticlePath[];
   status: StatusDocument;
+  imageStatus: ImageStatusDocument;
   missingStatusPaths: string[];
   orphanStatusPaths: string[];
 }
