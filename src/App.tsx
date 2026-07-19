@@ -2,13 +2,13 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { GithubClient, type ConnectionTestResult } from "./github";
 import { GithubApiError } from "./github-errors";
 import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKey, isNotificationConfigured, isPushSupported, requiresStandalonePwa, subscribeToPublicationNotifications, unsubscribeFromPublicationNotifications } from "./notifications";
-import { buildPublicationSchedule, DEFAULT_SCHEDULE } from "./schedule";
+import { buildPublicationSchedule, DEFAULT_SCHEDULE, getPublicationScheduleFrequency, WEEKDAY_OPTIONS } from "./schedule";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadPublicationSchedule, loadToken, saveArticleReturnPath, savePublicationSchedule, saveToken } from "./storage";
 
 const NOTE_COMPOSE_URL = "https://note.com/intent/post";
-import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, PublicationScheduleConfig, PushSubscriptionData, RepositorySnapshot } from "./types";
+import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, PublicationScheduleConfig, PublicationScheduleFrequency, PushSubscriptionData, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   design: "design",
@@ -485,6 +485,20 @@ function DashboardPanel({ snapshot, schedule, onScheduleChange, client }: { snap
   const pendingImages = snapshot.articles.filter((article) => summarizeImageTasks(snapshot.imageStatus, article.path).pending > 0).length;
   const scheduled = buildPublicationSchedule(snapshot.articles, schedule);
   const categories = [...new Set(snapshot.articles.map((article) => article.category))];
+  const frequency = getPublicationScheduleFrequency(schedule);
+  const queuedCount = snapshot.articles.filter((article) => article.status === "queued" && (schedule.category === "all" || article.category === schedule.category)).length;
+  const missingPublicationOrders = schedule.category === "all" && snapshot.articles.some((article) => article.status === "queued" && article.publicationOrder === undefined);
+  const changeFrequency = (nextFrequency: PublicationScheduleFrequency) => onScheduleChange({
+    ...schedule,
+    frequency: nextFrequency,
+    intervalDays: nextFrequency === "daily" ? 1 : nextFrequency === "biweekly" ? 14 : 7,
+    weekdays: nextFrequency === "weekdays" && (!schedule.weekdays || schedule.weekdays.length === 0) ? [1] : schedule.weekdays,
+  });
+  const changeWeekdays = (weekday: number, checked: boolean) => {
+    const current = schedule.weekdays ?? [];
+    const weekdays = checked ? [...new Set([...current, weekday])] : current.filter((value) => value !== weekday);
+    onScheduleChange({ ...schedule, frequency: "weekdays", intervalDays: 7, weekdays });
+  };
   return (
     <section className="dashboard-panel" aria-labelledby="dashboard-heading">
       <div className="dashboard-heading-line">
@@ -498,16 +512,27 @@ function DashboardPanel({ snapshot, schedule, onScheduleChange, client }: { snap
         <DashboardMetric label="画像未決定" value={pendingImages} tone="image" />
       </div>
       <Accordion className="schedule-card" label="公開スケジュールを設定">
-        <p className="image-plan-intro">公開待ちの記事を、ファイル名の接頭辞順で予定日に並べます。設定はこの端末に保存されます。</p>
+        <p className="image-plan-intro">公開待ちの記事を予定日に並べます。全カテゴリでは <code>status.json</code> の全体公開順を優先し、未設定の記事はカテゴリ内の順番で後ろに続きます。設定はこの端末に保存されます。</p>
         <div className="schedule-fields">
           <label htmlFor="schedule-start">開始日時</label>
           <input id="schedule-start" type="datetime-local" value={schedule.startAt} onChange={(event) => onScheduleChange({ ...schedule, startAt: event.target.value })} />
           <label htmlFor="schedule-interval">公開間隔</label>
-          <select id="schedule-interval" value={schedule.intervalDays} onChange={(event) => onScheduleChange({ ...schedule, intervalDays: Number(event.target.value) })}>
-            <option value="1">毎日</option>
-            <option value="7">毎週</option>
-            <option value="14">2週間ごと</option>
+          <select id="schedule-interval" value={frequency} onChange={(event) => changeFrequency(event.target.value as PublicationScheduleFrequency)}>
+            <option value="daily">毎日</option>
+            <option value="weekly">毎週</option>
+            <option value="biweekly">2週間ごと</option>
+            <option value="weekdays">曜日を指定（毎週）</option>
           </select>
+          {frequency === "weekdays" && <fieldset className="schedule-weekdays">
+            <legend>公開・通知する曜日</legend>
+            <div className="schedule-weekday-options">
+              {WEEKDAY_OPTIONS.map((weekday) => <label className="schedule-weekday-label" key={weekday.value} htmlFor={`schedule-weekday-${weekday.value}`}>
+                <input id={`schedule-weekday-${weekday.value}`} type="checkbox" checked={(schedule.weekdays ?? []).includes(weekday.value)} onChange={(event) => changeWeekdays(weekday.value, event.target.checked)} />
+                {weekday.label}
+              </label>)}
+            </div>
+            {(schedule.weekdays ?? []).length === 0 && <p className="inline-message">曜日を1つ以上選択してください。</p>}
+          </fieldset>}
           <label htmlFor="schedule-category">対象カテゴリ</label>
           <select id="schedule-category" value={schedule.category} onChange={(event) => onScheduleChange({ ...schedule, category: event.target.value })}>
             <option value="all">全カテゴリ</option>
@@ -516,6 +541,7 @@ function DashboardPanel({ snapshot, schedule, onScheduleChange, client }: { snap
           <label htmlFor="schedule-notification-time">通知時刻（日本時間）</label>
           <input id="schedule-notification-time" type="time" step="900" value={schedule.notificationTime ?? DEFAULT_NOTIFICATION_TIME} onChange={(event) => onScheduleChange({ ...schedule, notificationTime: event.target.value })} />
         </div>
+        {schedule.category === "all" && queuedCount > 0 && missingPublicationOrders && <p className="inline-message">全体公開順が未設定の記事があります。AIで順番を決めたら、各記事の <code>publicationOrder</code> を <code>status.json</code> に追加してください。</p>}
         {scheduled.length === 0 && <p className="inline-message">開始日時を設定すると、公開待ち記事の予定が表示されます。</p>}
         {scheduled.length > 0 && <ol className="schedule-list">{scheduled.slice(0, 8).map((item) => <li key={item.path}><time dateTime={item.scheduledAt}>{formatScheduleTime(item.scheduledAt)}</time><span>{articleDisplayName({ path: item.path, category: item.category, status: "queued", queueOrder: item.queueOrder, publishedUrl: null, publishedAt: null })}</span></li>)}</ol>}
         {scheduled.length > 8 && <p className="inline-message">ほか {scheduled.length - 8} 件</p>}

@@ -136,6 +136,7 @@ export function buildStatusDocument(repoRoot, previousDocument = null) {
     articles[path] = {
       status,
       ...(queueOrder === undefined ? {} : { queueOrder: queueEntry?.order ?? queueOrder }),
+      ...(Number.isInteger(previous?.publicationOrder) && previous.publicationOrder > 0 ? { publicationOrder: previous.publicationOrder } : {}),
       publishedUrl: previous?.publishedUrl ?? null,
       publishedAt: previous?.publishedAt ?? null,
     };

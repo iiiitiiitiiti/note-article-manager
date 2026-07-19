@@ -3,6 +3,7 @@ export type ArticleStatus = "queued" | "review" | "published" | "draft" | "unset
 export interface ArticleStatusEntry {
   status: ArticleStatus;
   queueOrder?: number;
+  publicationOrder?: number;
   publishedUrl: string | null;
   publishedAt: string | null;
 }
@@ -57,6 +58,7 @@ export interface ArticlePath {
   category: string;
   status: ArticleStatus;
   queueOrder?: number;
+  publicationOrder?: number;
   publishedUrl: string | null;
   publishedAt: string | null;
 }
@@ -108,8 +110,12 @@ export interface PublicationScheduleConfig {
   startAt: string;
   intervalDays: number;
   category: string;
+  frequency?: PublicationScheduleFrequency;
+  weekdays?: number[];
   notificationTime?: string;
 }
+
+export type PublicationScheduleFrequency = "daily" | "weekly" | "biweekly" | "weekdays";
 
 export interface PushSubscriptionData {
   endpoint: string;
@@ -134,6 +140,7 @@ export interface ScheduledArticle {
   path: string;
   category: string;
   queueOrder?: number;
+  publicationOrder?: number;
   scheduledAt: string;
 }
 
