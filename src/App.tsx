@@ -7,7 +7,7 @@ import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImage
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadPublicationSchedule, loadToken, saveArticleReturnPath, savePublicationSchedule, saveToken } from "./storage";
 
-const NOTE_APP_URL = "https://note.com/";
+const NOTE_APP_URL = "https://note.com/intent/post";
 import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, PublicationScheduleConfig, PublicationScheduleFrequency, PushSubscriptionData, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
