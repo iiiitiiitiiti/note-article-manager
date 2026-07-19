@@ -88,7 +88,11 @@ h2 { font-size: 1.05rem; }
 .schedule-weekday-label input { width: auto; min-width: auto; }
 .schedule-list { display: grid; gap: 6px; margin: 14px 0 0; padding-left: 24px; }
 .schedule-list li { display: flex; flex-wrap: wrap; gap: 8px; color: #263b32; }
+.schedule-list-item { align-items: flex-start; }
 .schedule-list time { min-width: 150px; color: #98551e; font-size: .82rem; font-weight: 700; }
+.schedule-item-details { display: grid; gap: 2px; min-width: 0; }
+.schedule-item-title { overflow-wrap: anywhere; }
+.schedule-item-category { color: #637068; font-size: .78rem; }
 .notification-settings { margin-top: 16px; border-top: 1px solid #e5e1d8; padding-top: 14px; }
 .notification-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .notification-heading span { border-radius: 999px; padding: 3px 8px; background: #e9e7e1; color: #637068; font-size: .72rem; font-weight: 700; }

@@ -2,6 +2,7 @@ export type ArticleStatus = "queued" | "review" | "published" | "draft" | "unset
 
 export interface ArticleStatusEntry {
   status: ArticleStatus;
+  title?: string;
   queueOrder?: number;
   publicationOrder?: number;
   publishedUrl: string | null;
@@ -57,6 +58,7 @@ export interface ArticlePath {
   path: string;
   category: string;
   status: ArticleStatus;
+  title?: string;
   queueOrder?: number;
   publicationOrder?: number;
   publishedUrl: string | null;
@@ -139,6 +141,7 @@ export interface NotificationConfig {
 export interface ScheduledArticle {
   path: string;
   category: string;
+  title?: string;
   queueOrder?: number;
   publicationOrder?: number;
   scheduledAt: string;

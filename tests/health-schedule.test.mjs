@@ -39,13 +39,17 @@ test("publication schedule uses queued articles and the configured interval", ()
 
 test("all-category publication schedules use the explicit mixed publication order", () => {
   const articles = [
-    { path: "book-review/01_book.md", category: "book-review", status: "queued", queueOrder: 1, publicationOrder: 2, publishedUrl: null, publishedAt: null },
-    { path: "design/01_design.md", category: "design", status: "queued", queueOrder: 1, publicationOrder: 1, publishedUrl: null, publishedAt: null },
+    { path: "book-review/01_book.md", category: "book-review", title: "書評タイトル", status: "queued", queueOrder: 1, publicationOrder: 2, publishedUrl: null, publishedAt: null },
+    { path: "design/01_design.md", category: "design", title: "デザインタイトル", status: "queued", queueOrder: 1, publicationOrder: 1, publishedUrl: null, publishedAt: null },
     { path: "essay/essay.md", category: "essay", status: "queued", publishedUrl: null, publishedAt: null },
   ];
   const schedule = buildPublicationSchedule(articles, { startAt: "2026-07-20T09:00:00Z", intervalDays: 7, category: "all", frequency: "weekly" });
 
   assert.deepEqual(schedule.map((item) => item.path), ["design/01_design.md", "book-review/01_book.md"]);
+  assert.deepEqual(schedule.map((item) => ({ title: item.title, category: item.category })), [
+    { title: "デザインタイトル", category: "design" },
+    { title: "書評タイトル", category: "book-review" },
+  ]);
   assert.equal(hasMissingPublicationOrders(articles, "all"), false);
 });
 

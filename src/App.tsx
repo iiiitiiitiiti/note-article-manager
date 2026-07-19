@@ -543,7 +543,7 @@ function DashboardPanel({ snapshot, schedule, onScheduleChange, client }: { snap
         </div>
         {schedule.category === "all" && queuedCount > 0 && missingPublicationOrders && <p className="inline-message">全体公開順が未設定の記事があります。AIで順番を決めたら、各記事の <code>publicationOrder</code> を <code>status.json</code> に追加してください。</p>}
         {scheduled.length === 0 && <p className="inline-message">開始日時を設定すると、公開待ち記事の予定が表示されます。</p>}
-        {scheduled.length > 0 && <ol className="schedule-list">{scheduled.slice(0, 8).map((item) => <li key={item.path}><time dateTime={item.scheduledAt}>{formatScheduleTime(item.scheduledAt)}</time><span>{articleDisplayName({ path: item.path, category: item.category, status: "queued", queueOrder: item.queueOrder, publishedUrl: null, publishedAt: null })}</span></li>)}</ol>}
+        {scheduled.length > 0 && <ol className="schedule-list">{scheduled.slice(0, 8).map((item) => <li className="schedule-list-item" key={item.path}><time dateTime={item.scheduledAt}>{formatScheduleTime(item.scheduledAt)}</time><span className="schedule-item-details"><strong className="schedule-item-title">{item.title ?? articleDisplayName({ path: item.path, category: item.category, status: "queued", queueOrder: item.queueOrder, publishedUrl: null, publishedAt: null })}</strong><small className="schedule-item-category">{CATEGORY_LABELS[item.category] ?? item.category}</small></span></li>)}</ol>}
         {scheduled.length > 8 && <p className="inline-message">ほか {scheduled.length - 8} 件</p>}
         <NotificationPanel client={client} schedule={schedule} />
       </Accordion>

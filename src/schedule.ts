@@ -34,6 +34,7 @@ export function buildPublicationSchedule(articles: ArticlePath[], config: Public
     return scheduledAt ? [{
       path: article.path,
       category: article.category,
+      ...(article.title === undefined ? {} : { title: article.title }),
       queueOrder: article.queueOrder,
       publicationOrder: article.publicationOrder,
       scheduledAt: scheduledAt.toISOString(),

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { buildStatusDocument, extractFilenameOrder, parseDesignQueue, parseDisneyReviewStatuses } from "../scripts/init-status.mjs";
+import { buildStatusDocument, extractArticleTitle, extractFilenameOrder, parseDesignQueue, parseDisneyReviewStatuses } from "../scripts/init-status.mjs";
 import { buildImageStatusDocument, parseImagePlaceholders } from "../scripts/init-image-status.mjs";
 
 test("parseDesignQueue validates order and filename numbers", () => {
@@ -32,6 +32,13 @@ test("extractFilenameOrder and parseDisneyReviewStatuses derive publication and 
   ]);
 });
 
+test("extractArticleTitle reads the first H1 or H2 and ignores a missing heading", () => {
+  assert.equal(extractArticleTitle("# 日本語のタイトル\n\n本文"), "日本語のタイトル");
+  assert.equal(extractArticleTitle("## 小見出しタイトル\n\n本文"), "小見出しタイトル");
+  assert.equal(extractArticleTitle("本文だけ\n"), undefined);
+  assert.equal(extractArticleTitle("#    \n"), undefined);
+});
+
 test("buildStatusDocument initializes every article and preserves published state", () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "note-article-manager-"));
   mkdirSync(join(repoRoot, "design"));
@@ -49,10 +56,10 @@ test("buildStatusDocument initializes every article and preserves published stat
   assert.deepEqual(buildStatusDocument(repoRoot), {
     schemaVersion: 1,
     articles: {
-      "design/01_one.md": { status: "queued", queueOrder: 1, publishedUrl: null, publishedAt: null },
-      "disney/01_one.md": { status: "queued", queueOrder: 1, publishedUrl: null, publishedAt: null },
-      "disney/02_two.md": { status: "review", queueOrder: 2, publishedUrl: null, publishedAt: null },
-      "essay/日記.md": { status: "queued", publishedUrl: null, publishedAt: null },
+      "design/01_one.md": { status: "queued", title: "One", queueOrder: 1, publishedUrl: null, publishedAt: null },
+      "disney/01_one.md": { status: "queued", title: "One", queueOrder: 1, publishedUrl: null, publishedAt: null },
+      "disney/02_two.md": { status: "review", title: "Two", queueOrder: 2, publishedUrl: null, publishedAt: null },
+      "essay/日記.md": { status: "queued", title: "日記", publishedUrl: null, publishedAt: null },
     },
   });
 
@@ -63,6 +70,7 @@ test("buildStatusDocument initializes every article and preserves published stat
     },
   }).articles["essay/日記.md"], {
     status: "published",
+    title: "日記",
     publicationOrder: 4,
     publishedUrl: "https://note.com/example",
     publishedAt: "2026-07-18T00:00:00.000Z",
