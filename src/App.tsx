@@ -6,7 +6,7 @@ import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadToken, saveArticleReturnPath, saveToken } from "./storage";
 
 const NOTE_COMPOSE_URL = "https://note.com/intent/post";
-import type { ArticleContent, ArticlePath, ImageDecision, ImageStatusDocument, RepositorySnapshot } from "./types";
+import type { ArticleContent, ArticlePath, ImageDecision, ImageRegistrationStage, ImageStatusDocument, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   design: "design",
@@ -25,6 +25,19 @@ const IMAGE_DECISIONS: Array<{ value: ImageDecision; label: string }> = [
 ];
 
 const IMAGE_DECISION_LABELS: Record<ImageDecision, string> = Object.fromEntries(IMAGE_DECISIONS.map((item) => [item.value, item.label])) as Record<ImageDecision, string>;
+const IMAGE_STAGE_LABELS: Record<ImageRegistrationStage, string> = {
+  "not-started": "未開始",
+  "asset-uploaded": "画像登録済み",
+  "article-updated": "本文差し込み済み",
+  completed: "状態保存済み",
+};
+
+type ArticleOperationError = {
+  error: Error;
+  retry: () => void;
+  reloadArticle?: () => void;
+  checkOrphans?: () => void;
+};
 
 export default function App() {
   const [token, setToken] = useState(loadToken);
@@ -274,10 +287,22 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
 }) {
   const [manualCopy, setManualCopy] = useState<{ label: string; text: string; openNoteAfterCopy: boolean } | null>(null);
   const [message, setMessage] = useState("");
-  const [operationError, setOperationError] = useState<{ error: Error; retry: () => void } | null>(null);
+  const [operationError, setOperationError] = useState<ArticleOperationError | null>(null);
   const [publishedUrl, setPublishedUrl] = useState(currentStatus?.publishedUrl ?? "");
   const [saving, setSaving] = useState(false);
   const [imageBusy, setImageBusy] = useState("");
+  const [orphanImages, setOrphanImages] = useState<Record<string, string[]>>({});
+  const [orphanCheckBusy, setOrphanCheckBusy] = useState("");
+
+  useEffect(() => {
+    setOrphanImages({});
+  }, [selectedPath]);
+
+  const reloadArticle = () => {
+    setOperationError(null);
+    setOrphanImages({});
+    onArticleUpdated();
+  };
 
   const openNote = () => {
     onPrepareNoteNavigation();
@@ -355,21 +380,96 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
     try {
       const assetPath = buildImageAssetPath(selectedPath, taskId, file.name);
       await client.uploadImage(assetPath, new Uint8Array(await file.arrayBuffer()));
-      const assetName = assetPath.split("/images/").at(-1) ?? assetPath;
-      await client.updateArticleWithImage(selectedPath, taskId, `![${placeholder.description}](images/${assetName})`);
       const currentState = getImageTaskState(imageStatus, selectedPath, taskId);
-      const updated = await client.updateImageTaskState(selectedPath, taskId, {
+      const assetUploaded = await client.updateImageTaskState(selectedPath, taskId, {
         decision: currentState.decision === "pending" ? "provide" : currentState.decision,
         assetPath,
+        registrationStage: "asset-uploaded",
         updatedAt: new Date().toISOString(),
       });
-      onImageStatusSaved(updated);
-      onArticleUpdated();
+      onImageStatusSaved(assetUploaded);
+      await client.updateArticleWithImage(selectedPath, taskId, imageMarkdownFor(placeholder.description, assetPath));
+      const articleUpdated = await client.updateImageTaskState(selectedPath, taskId, {
+        assetPath,
+        registrationStage: "article-updated",
+        updatedAt: new Date().toISOString(),
+      });
+      onImageStatusSaved(articleUpdated);
+      const completed = await client.updateImageTaskState(selectedPath, taskId, {
+        assetPath,
+        registrationStage: "completed",
+        updatedAt: new Date().toISOString(),
+      });
+      onImageStatusSaved(completed);
+      reloadArticle();
       setMessage("画像を登録し、記事本文へ差し込みました。");
     } catch (uploadError) {
-      setOperationError({ error: toError(uploadError, "画像の登録に失敗しました。"), retry: () => void uploadImage(taskId, file) });
+      setOperationError({
+        error: toError(uploadError, "画像の登録に失敗しました。"),
+        retry: () => void uploadImage(taskId, file),
+        reloadArticle,
+        checkOrphans: () => void checkOrphanImages(taskId),
+      });
     } finally {
       setImageBusy("");
+    }
+  };
+
+  const resumeImageRegistration = async (taskId: string) => {
+    const placeholder = article?.imagePlaceholders.find((item) => item.id === taskId);
+    const currentState = getImageTaskState(imageStatus, selectedPath, taskId);
+    if (!placeholder || !currentState.assetPath || !["asset-uploaded", "article-updated"].includes(currentState.registrationStage)) return;
+    setImageBusy(taskId);
+    setMessage("");
+    setOperationError(null);
+    try {
+      let stage = currentState.registrationStage;
+      if (stage === "asset-uploaded") {
+        await client.updateArticleWithImage(selectedPath, taskId, imageMarkdownFor(placeholder.description, currentState.assetPath));
+        const articleUpdated = await client.updateImageTaskState(selectedPath, taskId, {
+          assetPath: currentState.assetPath,
+          registrationStage: "article-updated",
+          updatedAt: new Date().toISOString(),
+        });
+        onImageStatusSaved(articleUpdated);
+        stage = "article-updated";
+      }
+      if (stage === "article-updated") {
+        const completed = await client.updateImageTaskState(selectedPath, taskId, {
+          assetPath: currentState.assetPath,
+          registrationStage: "completed",
+          updatedAt: new Date().toISOString(),
+        });
+        onImageStatusSaved(completed);
+        setMessage("途中状態から画像登録を再開し、完了しました。");
+        reloadArticle();
+      }
+    } catch (resumeError) {
+      setOperationError({
+        error: toError(resumeError, "画像登録の再開に失敗しました。"),
+        retry: () => void resumeImageRegistration(taskId),
+        reloadArticle,
+        checkOrphans: () => void checkOrphanImages(taskId),
+      });
+    } finally {
+      setImageBusy("");
+    }
+  };
+
+  const checkOrphanImages = async (taskId: string) => {
+    setOrphanCheckBusy(taskId);
+    setOperationError(null);
+    try {
+      const markdown = await client.getArticle(selectedPath);
+      const assets = await client.getArticleImageAssets(selectedPath);
+      const linkedImages = new Set(renderArticle(markdown, selectedPath).localImagePaths);
+      const orphaned = assets.filter((assetPath) => !linkedImages.has(assetPath));
+      setOrphanImages((current) => ({ ...current, [taskId]: orphaned }));
+      setMessage(orphaned.length > 0 ? `孤児画像の候補が${orphaned.length}件あります。` : "孤児画像の候補はありません。");
+    } catch (orphanError) {
+      setOperationError({ error: toError(orphanError, "孤児画像を確認できませんでした。"), retry: () => void checkOrphanImages(taskId) });
+    } finally {
+      setOrphanCheckBusy("");
     }
   };
 
@@ -380,7 +480,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
         <span className="article-row-path">{selectedPath}</span>
       </header>
       {error && <ErrorNotice error={error} onRetry={onRetry} onOpenSettings={onOpenSettings} />}
-      {operationError && <ErrorNotice error={operationError.error} onRetry={operationError.retry} onOpenSettings={onOpenSettings} />}
+      {operationError && <ErrorNotice error={operationError.error} onRetry={operationError.retry} onOpenSettings={onOpenSettings} onReloadArticle={operationError.reloadArticle} onCheckOrphans={operationError.checkOrphans} />}
       {articleLoading && <p className="loading">本文を読み込んでいます…</p>}
       {article && (
         <>
@@ -405,7 +505,10 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
                     <div className="image-task" key={placeholder.id}>
                       <div className="image-task-heading">
                         <strong>画像 {index + 1}{placeholder.optional ? "（任意）" : ""}</strong>
-                        <span className={`image-decision image-decision-${state.decision}`}>{IMAGE_DECISION_LABELS[state.decision]}</span>
+                        <div className="image-task-badges">
+                          <span className={`image-registration-stage image-stage-${state.registrationStage}`}>{IMAGE_STAGE_LABELS[state.registrationStage]}</span>
+                          <span className={`image-decision image-decision-${state.decision}`}>{IMAGE_DECISION_LABELS[state.decision]}</span>
+                        </div>
                       </div>
                       <p>{placeholder.description}</p>
                       <div className="image-decision-actions" role="group" aria-label={`画像${index + 1}の判断`}>
@@ -413,6 +516,17 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
                       </div>
                       {state.decision === "generate" && <button className="secondary-button image-prompt-button" type="button" disabled={busy} onClick={() => copy("画像生成用プロンプト", buildImagePrompt(article.title, placeholder.description))}>生成用プロンプトをコピー</button>}
                       {state.assetPath && <p className="image-asset-path">登録済み: {state.assetPath}</p>}
+                      {["asset-uploaded", "article-updated"].includes(state.registrationStage) && state.assetPath && (
+                        <div className="image-recovery">
+                          <p><strong>途中状態：</strong>{IMAGE_STAGE_LABELS[state.registrationStage]}。まだ完了していません。</p>
+                          <div className="image-recovery-actions">
+                            <button className="secondary-button" type="button" disabled={busy} onClick={() => void resumeImageRegistration(placeholder.id)}>続きを再試行</button>
+                            <button className="secondary-button" type="button" disabled={busy} onClick={reloadArticle}>記事を再読み込み</button>
+                            <button className="secondary-button" type="button" disabled={orphanCheckBusy === placeholder.id} onClick={() => void checkOrphanImages(placeholder.id)}>{orphanCheckBusy === placeholder.id ? "確認中…" : "孤児画像を確認"}</button>
+                          </div>
+                          {orphanImages[placeholder.id] && (orphanImages[placeholder.id].length > 0 ? <ul className="orphan-image-list">{orphanImages[placeholder.id].map((orphanPath) => <li key={orphanPath}><code>{orphanPath}</code></li>)}</ul> : <p className="orphan-image-empty">孤児画像の候補はありません。</p>)}
+                        </div>
+                      )}
                       <label className="secondary-button image-upload-button" htmlFor={`${placeholder.id}-upload`}>{busy ? "登録中…" : "画像を登録"}</label>
                       <input className="visually-hidden" id={`${placeholder.id}-upload`} type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void uploadImage(placeholder.id, file); }} />
                     </div>
@@ -475,10 +589,11 @@ function StatusBadge({ status }: { status: ArticlePath["status"] }) {
   return <span className={`status-badge status-${status}`}>{labels[status]}</span>;
 }
 
-function ErrorNotice({ error, onRetry, onOpenSettings }: { error: Error; onRetry?: () => void; onOpenSettings?: () => void }) {
+function ErrorNotice({ error, onRetry, onOpenSettings, onReloadArticle, onCheckOrphans }: { error: Error; onRetry?: () => void; onOpenSettings?: () => void; onReloadArticle?: () => void; onCheckOrphans?: () => void }) {
   const githubError = error instanceof GithubApiError ? error : null;
   const showRetry = Boolean(onRetry && (!githubError || githubError.action === "retry"));
   const showSettings = Boolean(onOpenSettings && githubError?.action === "settings");
+  const showRecoveryActions = Boolean(onReloadArticle || onCheckOrphans);
   return (
     <div className="error-notice" role="alert">
       {githubError ? (
@@ -488,14 +603,21 @@ function ErrorNotice({ error, onRetry, onOpenSettings }: { error: Error; onRetry
           <p className="error-next-step"><strong>次の操作:</strong> {githubError.nextStep}</p>
         </>
       ) : <p className="error-reason">{error.message}</p>}
-      {(showRetry || showSettings) && (
+      {(showRetry || showSettings || showRecoveryActions) && (
         <div className="error-actions">
           {showRetry && <button className="secondary-button" type="button" onClick={onRetry}>再試行</button>}
+          {onReloadArticle && <button className="secondary-button" type="button" onClick={onReloadArticle}>記事を再読み込み</button>}
+          {onCheckOrphans && <button className="secondary-button" type="button" onClick={onCheckOrphans}>孤児画像を確認</button>}
           {showSettings && <button className="secondary-button" type="button" onClick={onOpenSettings}>設定を開く</button>}
         </div>
       )}
     </div>
   );
+}
+
+function imageMarkdownFor(description: string, assetPath: string): string {
+  const assetName = assetPath.split("/images/").at(-1) ?? assetPath;
+  return `![${description}](images/${assetName})`;
 }
 
 function toError(value: unknown, fallback: string): Error {

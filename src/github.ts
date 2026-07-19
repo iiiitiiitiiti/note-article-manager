@@ -1,5 +1,5 @@
 import { mergeArticlePaths, validateStatusDocument, withArticleStatus } from "./status";
-import { emptyImageStatusDocument, IMAGE_STATUS_PATH, MAX_IMAGE_BYTES, replaceImagePlaceholder, validateImageStatusDocument, withImageTaskState } from "./image-plan";
+import { emptyImageStatusDocument, filterArticleImageAssets, IMAGE_STATUS_PATH, MAX_IMAGE_BYTES, replaceImagePlaceholder, validateImageStatusDocument, withImageTaskState } from "./image-plan";
 import { createGithubApiError, createGithubNetworkError } from "./github-errors";
 import type { ArticleStatusEntry, ImageStatusDocument, ImageTaskState, RepositorySnapshot, StatusDocument } from "./types";
 
@@ -25,6 +25,11 @@ interface ContentsResponse {
 interface TreeResponse {
   tree?: Array<{ path?: string; type?: string }>;
   truncated?: boolean;
+}
+
+interface DirectoryEntry {
+  path?: string;
+  type?: string;
 }
 
 export class GithubClient {
@@ -71,6 +76,20 @@ export class GithubClient {
     const normalized = file.content.replace(/\s/g, "");
     if (normalized.length * 0.75 > MAX_IMAGE_BYTES) throw new Error(`画像が大きすぎるためプレビューできません: ${path}`);
     return `data:${mimeTypeForPath(path)};base64,${normalized}`;
+  }
+
+  public async getArticleImageAssets(articlePath: string): Promise<string[]> {
+    const category = articlePath.split("/", 1)[0];
+    const response = await this.request<DirectoryEntry[]>(
+      `/repos/${OWNER}/${REPOSITORY}/contents/${encodePath(`${category}/images`)}?ref=${BRANCH}`,
+      {},
+      undefined,
+      [404],
+      "孤児画像の確認",
+    );
+    if (response.status === 404) return [];
+    if (response.status !== 200 || !Array.isArray(response.data)) throw new Error("画像一覧を取得できませんでした。");
+    return filterArticleImageAssets(articlePath, response.data);
   }
 
   public async uploadImage(path: string, bytes: Uint8Array): Promise<void> {

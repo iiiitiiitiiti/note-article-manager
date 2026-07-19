@@ -1,9 +1,10 @@
-import type { ImageDecision, ImagePlaceholder, ImageStatusArticle, ImageStatusDocument, ImageTaskState } from "./types";
+import type { ImageDecision, ImagePlaceholder, ImageRegistrationStage, ImageStatusArticle, ImageStatusDocument, ImageTaskState } from "./types";
 
 export const IMAGE_STATUS_PATH = "image-status.json";
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const VALID_DECISIONS = new Set<ImageDecision>(["pending", "generate", "provide", "skip"]);
+const VALID_REGISTRATION_STAGES = new Set<ImageRegistrationStage>(["not-started", "asset-uploaded", "article-updated", "completed"]);
 const PLACEHOLDER_PATTERN = /^[ \t]*【画像[^】]*】[ \t]*$/gm;
 const MARKDOWN_IMAGE_PATTERN = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g;
 
@@ -38,12 +39,17 @@ export function validateImageStatusDocument(value: unknown): ImageStatusDocument
       if (task.assetPath !== null && task.assetPath !== undefined && !isSafeAssetPath(task.assetPath)) {
         throw new Error(`画像タスクの assetPath が不正です: ${path}/${taskId}`);
       }
+      const registrationStage = task.registrationStage ?? (task.assetPath ? "completed" : "not-started");
+      if (typeof registrationStage !== "string" || !VALID_REGISTRATION_STAGES.has(registrationStage as ImageRegistrationStage)) {
+        throw new Error(`画像タスクの registrationStage が不正です: ${path}/${taskId}`);
+      }
       if (task.updatedAt !== null && task.updatedAt !== undefined && Number.isNaN(Date.parse(task.updatedAt))) {
         throw new Error(`画像タスクの updatedAt が不正です: ${path}/${taskId}`);
       }
       tasks[taskId] = {
         decision: task.decision as ImageDecision,
         assetPath: task.assetPath ?? null,
+        registrationStage: registrationStage as ImageRegistrationStage,
         updatedAt: task.updatedAt ?? null,
       };
     }
@@ -87,7 +93,7 @@ export function createImageTaskId(description: string, occurrence: number): stri
 }
 
 export function getImageTaskState(document: ImageStatusDocument, articlePath: string, taskId: string): ImageTaskState {
-  return document.articles[articlePath]?.tasks[taskId] ?? { decision: "pending", assetPath: null, updatedAt: null };
+  return document.articles[articlePath]?.tasks[taskId] ?? { decision: "pending", assetPath: null, registrationStage: "not-started", updatedAt: null };
 }
 
 export function withImageTaskState(
@@ -113,8 +119,14 @@ export function withImageTaskState(
 
 export function replaceImagePlaceholder(markdown: string, taskId: string, replacement: string): string {
   const placeholder = parseImagePlaceholders(markdown).find((item) => item.id === taskId);
-  if (!placeholder) throw new Error("記事が更新されているため、画像プレースホルダーを見つけられません。記事を再読み込みしてください。");
-  return `${markdown.slice(0, placeholder.start)}${replacement}${markdown.slice(placeholder.end)}`;
+  if (placeholder) return `${markdown.slice(0, placeholder.start)}${replacement}${markdown.slice(placeholder.end)}`;
+
+  const existingImagePattern = new RegExp(`!\\[[^\\]]*\\]\\([^)]*${escapeRegExp(taskId)}\\.(?:png|jpe?g|webp|gif)(?:\\s+["'][^)]*["'])?\\)`, "i");
+  const existingImage = existingImagePattern.exec(markdown);
+  if (existingImage?.index !== undefined) {
+    return `${markdown.slice(0, existingImage.index)}${replacement}${markdown.slice(existingImage.index + existingImage[0].length)}`;
+  }
+  throw new Error("記事が更新されているため、画像プレースホルダーを見つけられません。記事を再読み込みしてください。");
 }
 
 export function buildImageAssetPath(articlePath: string, taskId: string, fileName: string): string {
@@ -122,10 +134,22 @@ export function buildImageAssetPath(articlePath: string, taskId: string, fileNam
   if (!extension || !["png", "jpg", "jpeg", "webp", "gif"].includes(extension)) {
     throw new Error("対応している画像形式は PNG、JPEG、WebP、GIF です。");
   }
+  return `${imageAssetPrefix(articlePath)}-${taskId}.${extension === "jpeg" ? "jpg" : extension}`;
+}
+
+export function imageAssetPrefix(articlePath: string): string {
   const category = articlePath.split("/", 1)[0];
   const articleName = articlePath.split("/").at(-1)?.replace(/\.md$/i, "") ?? "article";
   const slug = articleName.replace(/^\d+[_-]?/, "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "article";
-  return `${category}/images/${slug}-${taskId}.${extension === "jpeg" ? "jpg" : extension}`;
+  return `${category}/images/${slug}`;
+}
+
+export function filterArticleImageAssets(articlePath: string, entries: Array<{ path?: string; type?: string }>): string[] {
+  const prefix = `${imageAssetPrefix(articlePath)}-`;
+  return entries
+    .filter((entry) => entry.type === "file" && typeof entry.path === "string" && entry.path.startsWith(prefix) && /\.(?:png|jpe?g|webp|gif)$/i.test(entry.path))
+    .map((entry) => entry.path as string)
+    .sort((left, right) => left.localeCompare(right, "ja"));
 }
 
 export function extractLocalImagePaths(markdown: string, articlePath: string): string[] {
@@ -165,4 +189,8 @@ export function replaceLocalImageSources(markdown: string, articlePath: string, 
 
 function isSafeAssetPath(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && !value.startsWith("/") && !value.split("/").includes("..") && /\.(?:png|jpe?g|webp|gif)$/i.test(value);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
