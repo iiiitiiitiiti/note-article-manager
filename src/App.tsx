@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { GithubClient } from "./github";
 import { GithubApiError } from "./github-errors";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
@@ -39,6 +39,17 @@ type ArticleOperationError = {
   checkOrphans?: () => void;
 };
 
+type SyncPhase = "idle" | "checking" | "updated" | "unchanged" | "error";
+
+type SyncState = {
+  phase: SyncPhase;
+  checkedAt: number | null;
+  error: Error | null;
+};
+
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const FOREGROUND_COOLDOWN_MS = 30 * 1000;
+
 export default function App() {
   const [token, setToken] = useState(loadToken);
   const [showSettings, setShowSettings] = useState(!token);
@@ -51,24 +62,77 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [articleLoading, setArticleLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [pendingSnapshot, setPendingSnapshot] = useState<RepositorySnapshot | null>(null);
+  const [syncState, setSyncState] = useState<SyncState>({ phase: "idle", checkedAt: null, error: null });
+  const syncInFlightRef = useRef(false);
+  const lastCheckedAtRef = useRef(0);
+  const selectedPathRef = useRef<string | null>(null);
   const client = useMemo(() => (token ? new GithubClient(token) : null), [token]);
 
-  const reload = useCallback(async () => {
+  useEffect(() => {
+    selectedPathRef.current = selectedPath;
+  }, [selectedPath]);
+
+  const sync = useCallback(async (reason: "initial" | "manual" | "automatic") => {
     if (!client) return;
-    setLoading(true);
-    setError(null);
+    if (syncInFlightRef.current) return;
+    const now = Date.now();
+    if (reason === "automatic" && now - lastCheckedAtRef.current < FOREGROUND_COOLDOWN_MS) return;
+    syncInFlightRef.current = true;
+    setLoading(reason !== "automatic");
+    setSyncState((current) => ({ ...current, phase: "checking", error: null }));
     try {
-      setSnapshot(await client.loadSnapshot());
+      const result = await client.checkForUpdates();
+      const checkedAt = Date.now();
+      lastCheckedAtRef.current = checkedAt;
+      if (result.changed && selectedPathRef.current) {
+        setPendingSnapshot(result.snapshot);
+      } else if (result.changed) {
+        setSnapshot(result.snapshot);
+        setPendingSnapshot(null);
+      }
+      setSyncState({ phase: result.changed ? "updated" : "unchanged", checkedAt, error: null });
+      if (!selectedPathRef.current) setError(null);
     } catch (loadError) {
-      setError(toError(loadError, "記事一覧の取得に失敗しました。"));
+      const syncError = toError(loadError, "記事一覧の自動更新に失敗しました。");
+      lastCheckedAtRef.current = Date.now();
+      setSyncState({ phase: "error", checkedAt: lastCheckedAtRef.current, error: syncError });
+      if (!selectedPathRef.current) setError(syncError);
     } finally {
       setLoading(false);
+      syncInFlightRef.current = false;
     }
   }, [client]);
 
   useEffect(() => {
-    if (token && !showSettings) void reload();
-  }, [reload, showSettings, token]);
+    if (token && !showSettings) void sync("initial");
+  }, [showSettings, sync, token]);
+
+  useEffect(() => {
+    if (!token || showSettings || !client) return;
+    const checkForeground = () => {
+      if (document.visibilityState === "visible") void sync("automatic");
+    };
+    const intervalId = window.setInterval(() => void sync("automatic"), SYNC_INTERVAL_MS);
+    document.addEventListener("visibilitychange", checkForeground);
+    window.addEventListener("focus", checkForeground);
+    window.addEventListener("pageshow", checkForeground);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", checkForeground);
+      window.removeEventListener("focus", checkForeground);
+      window.removeEventListener("pageshow", checkForeground);
+    };
+  }, [client, showSettings, sync, token]);
+
+  const applyPendingSnapshot = () => {
+    if (!pendingSnapshot) return;
+    setSnapshot(pendingSnapshot);
+    setPendingSnapshot(null);
+    setSyncState((current) => ({ ...current, phase: "updated" }));
+  };
+
+  const reload = () => void sync("manual");
 
   const openArticle = useCallback(async (path: string) => {
     if (!client) return;
@@ -115,9 +179,12 @@ export default function App() {
     setToken(nextToken.trim());
     setShowSettings(false);
     setSnapshot(null);
+    setPendingSnapshot(null);
     setSelectedPath(null);
     setArticle(null);
     setError(null);
+    setSyncState({ phase: "idle", checkedAt: null, error: null });
+    lastCheckedAtRef.current = 0;
   };
 
   const handleTokenClear = () => {
@@ -126,12 +193,16 @@ export default function App() {
     setToken("");
     setShowSettings(true);
     setSnapshot(null);
+    setPendingSnapshot(null);
     setSelectedPath(null);
     setArticle(null);
     setError(null);
+    setSyncState({ phase: "idle", checkedAt: null, error: null });
+    lastCheckedAtRef.current = 0;
   };
 
   const openSettings = () => {
+    applyPendingSnapshot();
     setShowSettings(true);
     setSelectedPath(null);
     setArticle(null);
@@ -154,23 +225,32 @@ export default function App() {
         currentStatus={snapshot?.articles.find((item) => item.path === selectedPath)}
         client={client}
         imageStatus={snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }}
-        onBack={() => { clearArticleReturnPath(); setSelectedPath(null); setArticle(null); setError(null); }}
+        onBack={() => { applyPendingSnapshot(); clearArticleReturnPath(); setSelectedPath(null); setArticle(null); setError(null); }}
         onPrepareNoteNavigation={() => saveArticleReturnPath(selectedPath)}
-        onImageStatusSaved={(imageStatus) => setSnapshot((current) => current ? { ...current, imageStatus } : current)}
+        onImageStatusSaved={(imageStatus) => {
+          setSnapshot((current) => current ? { ...current, imageStatus } : current);
+          setPendingSnapshot((current) => current ? { ...current, imageStatus } : current);
+        }}
         onArticleUpdated={() => void openArticle(selectedPath)}
         onSaved={async (updatedStatus) => {
-          setSnapshot((current) => current ? {
+          const applyStatus = (current: RepositorySnapshot | null) => current ? {
             ...current,
             status: updatedStatus,
             articles: current.articles.map((item) => {
               const next = updatedStatus.articles[item.path];
               return next ? { ...item, ...next } : item;
             }),
-          } : current);
+          } : current;
+          setSnapshot(applyStatus);
+          setPendingSnapshot(applyStatus);
         }}
         error={error}
         onRetry={() => void openArticle(selectedPath)}
+        onSyncRetry={reload}
         onOpenSettings={openSettings}
+        syncState={syncState}
+        hasPendingSnapshot={Boolean(pendingSnapshot)}
+        onApplyPendingSnapshot={applyPendingSnapshot}
       />
     );
   }
@@ -190,13 +270,14 @@ export default function App() {
           <h1>記事を、公開できる状態にする。</h1>
         </div>
         <div className="header-actions">
-          <button className="icon-button" type="button" onClick={() => void reload()} disabled={loading} aria-label="再読み込み">↻</button>
+          <button className="icon-button" type="button" onClick={() => void reload()} disabled={loading || syncState.phase === "checking"} aria-label="再読み込み">↻</button>
           <button className="text-button" type="button" onClick={openSettings}>設定</button>
         </div>
       </header>
 
-      {error && <ErrorNotice error={error} onRetry={() => void reload()} onOpenSettings={openSettings} />}
+      {error && <ErrorNotice error={error} onRetry={reload} onOpenSettings={openSettings} />}
       {loading && <p className="loading">GitHub から記事一覧を読み込んでいます…</p>}
+      <SyncStatus state={syncState} onRetry={reload} />
       {snapshot && <RepositoryWarnings snapshot={snapshot} />}
 
       {snapshot && (
@@ -298,7 +379,32 @@ function ImageProgressBadge({ summary }: { summary: ImageProgressSummary }) {
   );
 }
 
-function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, client, imageStatus, onBack, onPrepareNoteNavigation, onSaved, onImageStatusSaved, onArticleUpdated, error, onRetry, onOpenSettings }: {
+function SyncStatus({ state, hasPendingSnapshot = false, onApplyPendingSnapshot, onRetry }: { state: SyncState; hasPendingSnapshot?: boolean; onApplyPendingSnapshot?: () => void; onRetry?: () => void }) {
+  const time = state.checkedAt ? formatSyncTime(state.checkedAt) : "未確認";
+  const errorMessage = state.error instanceof GithubApiError ? state.error.reason : state.error?.message;
+  let message = "";
+  if (state.phase === "checking") message = "確認中…";
+  else if (state.phase === "error") message = `同期に失敗しました。${errorMessage ?? "再試行してください。"}`;
+  else if (hasPendingSnapshot) message = "更新があります。現在の画面は保持しています。";
+  else if (state.phase === "updated") message = "更新を反映しました。";
+  else if (state.phase === "unchanged") message = "変更なし";
+
+  return (
+    <div className={`sync-status sync-${state.phase}${hasPendingSnapshot ? " sync-pending" : ""}`} role={state.phase === "error" ? "alert" : "status"}>
+      <span className="sync-status-label">自動更新</span>
+      <span>最終確認: {time}</span>
+      {message && <span>{message}</span>}
+      {hasPendingSnapshot && onApplyPendingSnapshot && <button className="secondary-button" type="button" onClick={onApplyPendingSnapshot}>更新を反映</button>}
+      {state.phase === "error" && onRetry && <button className="secondary-button" type="button" onClick={onRetry}>再試行</button>}
+    </div>
+  );
+}
+
+function formatSyncTime(timestamp: number): string {
+  return new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(timestamp);
+}
+
+function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, client, imageStatus, onBack, onPrepareNoteNavigation, onSaved, onImageStatusSaved, onArticleUpdated, error, onRetry, onSyncRetry, onOpenSettings, syncState, hasPendingSnapshot, onApplyPendingSnapshot }: {
   article: ArticleContent | null;
   articleLoading: boolean;
   selectedPath: string;
@@ -312,7 +418,11 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   onArticleUpdated: () => void;
   error: Error | null;
   onRetry: () => void;
+  onSyncRetry: () => void;
   onOpenSettings: () => void;
+  syncState: SyncState;
+  hasPendingSnapshot: boolean;
+  onApplyPendingSnapshot: () => void;
 }) {
   const [manualCopy, setManualCopy] = useState<{ label: string; text: string; openNoteAfterCopy: boolean } | null>(null);
   const [message, setMessage] = useState("");
@@ -508,6 +618,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
         <button className="back-button" type="button" onClick={onBack}>← 一覧に戻る</button>
         <span className="article-row-path">{selectedPath}</span>
       </header>
+      <SyncStatus state={syncState} hasPendingSnapshot={hasPendingSnapshot} onApplyPendingSnapshot={onApplyPendingSnapshot} onRetry={onSyncRetry} />
       {error && <ErrorNotice error={error} onRetry={onRetry} onOpenSettings={onOpenSettings} />}
       {operationError && <ErrorNotice error={operationError.error} onRetry={operationError.retry} onOpenSettings={onOpenSettings} onReloadArticle={operationError.reloadArticle} onCheckOrphans={operationError.checkOrphans} />}
       {articleLoading && <p className="loading">本文を読み込んでいます…</p>}

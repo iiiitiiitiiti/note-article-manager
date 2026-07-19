@@ -25,6 +25,7 @@ npm run dev
 - 手動コピー後もnote執筆画面へ移動できる
 - note の公開 URL を入力して、1記事分だけ `status.json` を GitHub へ書き戻し
 - ETag キャッシュと Contents API の SHA を分離して扱い、409 競合時は最新状態へ変更意図を再適用
+- 記事一覧・表示中の画面は5分間隔でGitHubへ条件付き確認を行い、Safari／PWAのフォアグラウンド復帰時にも確認する。復帰直後30秒以内の重複確認は抑制し、1回の確認でGit Tree・`status.json`・`image-status.json`のみを取得する（304時は本文・画像を取得しない）
 - GitHub APIの401／403／404／409／レート制限／5xx／通信断を対象別に表示し、必要に応じて「設定を開く」「再試行」を提示
 
 ## status.json の初期化
