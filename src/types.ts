@@ -89,6 +89,34 @@ export interface ImageInventory {
   scannedAssets: number;
 }
 
+export type ArticleHealthIssueKind = "note-unsupported" | "missing-image" | "image-placeholder" | "image-pending" | "image-registration";
+
+export interface ArticleHealthIssue {
+  kind: ArticleHealthIssueKind;
+  path: string;
+  message: string;
+  details: string[];
+}
+
+export interface ArticleHealthReport {
+  checkedAt: string;
+  scannedArticles: number;
+  issues: ArticleHealthIssue[];
+}
+
+export interface PublicationScheduleConfig {
+  startAt: string;
+  intervalDays: number;
+  category: string;
+}
+
+export interface ScheduledArticle {
+  path: string;
+  category: string;
+  queueOrder?: number;
+  scheduledAt: string;
+}
+
 export interface ImagePlaceholder {
   id: string;
   raw: string;

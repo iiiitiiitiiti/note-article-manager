@@ -1,7 +1,8 @@
 import { mergeArticlePaths, validateStatusDocument, withArticleStatus } from "./status";
 import { emptyImageStatusDocument, extractLocalImagePaths, filterArticleImageAssets, IMAGE_STATUS_PATH, MAX_IMAGE_BYTES, replaceImagePlaceholder, validateImageStatusDocument, withImageTaskState } from "./image-plan";
+import { inspectArticleHealth } from "./health";
 import { createGithubApiError, createGithubNetworkError } from "./github-errors";
-import type { ArticleStatusEntry, ImageInventory, ImageInventoryIssue, ImageStatusDocument, ImageTaskState, RepositorySnapshot, StatusDocument } from "./types";
+import type { ArticleHealthReport, ArticleStatusEntry, ImageInventory, ImageInventoryIssue, ImageStatusDocument, ImageTaskState, RepositorySnapshot, StatusDocument } from "./types";
 
 const API_ROOT = "https://api.github.com";
 const OWNER = "iiiitiiitiiti";
@@ -207,6 +208,24 @@ export class GithubClient {
     }
     issues.sort((left, right) => `${left.kind}:${left.path}`.localeCompare(`${right.kind}:${right.path}`, "ja"));
     return { issues, scannedArticles: articlePaths.length, scannedAssets: assets.length };
+  }
+
+  public async getArticleHealthReport(): Promise<ArticleHealthReport> {
+    const tree = await this.getRepositoryTree();
+    const articlePaths = tree.value
+      .filter((entry) => entry.type === "blob" && typeof entry.path === "string" && isArticlePath(entry.path))
+      .map((entry) => entry.path as string)
+      .sort((left, right) => left.localeCompare(right, "ja"));
+    const availableImages = new Set(tree.value
+      .filter((entry) => entry.type === "blob" && typeof entry.path === "string" && isImageAssetPath(entry.path))
+      .map((entry) => entry.path as string));
+    const imageStatus = await this.getImageStatusFile();
+    const articleContents = await Promise.all(articlePaths.map(async (path) => ({
+      path,
+      content: (await this.getArticleFile(path, "記事健全性チェック")).content,
+    })));
+    const issues = articleContents.flatMap((article) => inspectArticleHealth(article.content, article.path, availableImages, imageStatus.value.document));
+    return { checkedAt: new Date().toISOString(), scannedArticles: articlePaths.length, issues };
   }
 
   public async deleteImage(path: string, sha: string): Promise<void> {
