@@ -128,6 +128,7 @@ input:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3p
 .article-intro h1 { margin: 10px 0 16px; overflow-wrap: anywhere; }
 .article-intro-line { justify-content: flex-start; flex-wrap: wrap; }
 .transfer-actions { margin-bottom: 10px; }
+.note-open-action { margin-top: 8px; }
 .transfer-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 14px 0 8px; color: #637068; font-size: .82rem; }
 .mode-button { min-height: 40px; border: 1px solid #cfcac0; border-radius: 999px; padding: 7px 10px; background: #fffdf8; color: #4b5a51; font-size: .8rem; }
 .mode-button.active { border-color: #173f35; background: #173f35; color: #fff; }
