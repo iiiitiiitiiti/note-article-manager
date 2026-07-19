@@ -80,10 +80,11 @@ test("buildStatusDocument initializes every article and preserves published stat
 test("image placeholders become stable tasks and preserve decisions", () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "note-article-manager-images-"));
   mkdirSync(join(repoRoot, "design"));
-  writeFileSync(join(repoRoot, "design/01_one.md"), "# One\n\n【画像①: 見出し画像】\n\n【画像プレースホルダー（任意）：補足図】\n");
+  writeFileSync(join(repoRoot, "design/01_one.md"), "# One\n\n【画像①: 見出し画像】\n\n【画像プレースホルダー（任意）：補足図】\n\n【画像】バタフライ投票用紙の構造を再現した自作の図解。\n");
   const placeholders = parseImagePlaceholders(readFileSync(join(repoRoot, "design/01_one.md"), "utf8"));
-  assert.equal(placeholders.length, 2);
+  assert.equal(placeholders.length, 3);
   assert.equal(placeholders[0].description, "見出し画像");
+  assert.equal(placeholders[2].description, "バタフライ投票用紙の構造を再現した自作の図解。");
   const previous = {
     schemaVersion: 1,
     articles: {
@@ -101,6 +102,7 @@ test("image placeholders become stable tasks and preserve decisions", () => {
         tasks: {
           [placeholders[0].id]: { decision: "generate", assetPath: "design/images/one.png", updatedAt: "2026-07-18T00:00:00.000Z" },
           [placeholders[1].id]: { decision: "pending", assetPath: null, updatedAt: null },
+          [placeholders[2].id]: { decision: "pending", assetPath: null, updatedAt: null },
         },
       },
     },

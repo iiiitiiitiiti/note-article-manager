@@ -5,7 +5,7 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const VALID_DECISIONS = new Set<ImageDecision>(["pending", "generate", "provide", "skip"]);
 const VALID_REGISTRATION_STAGES = new Set<ImageRegistrationStage>(["not-started", "asset-uploaded", "article-updated", "completed"]);
-const PLACEHOLDER_PATTERN = /^[ \t]*【画像[^】]*】[ \t]*$/gm;
+const PLACEHOLDER_PATTERN = /^[ \t]*【画像[^】]*】[^\r\n]*$/gm;
 const MARKDOWN_IMAGE_PATTERN = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g;
 
 export function emptyImageStatusDocument(): ImageStatusDocument {
@@ -64,10 +64,13 @@ export function parseImagePlaceholders(markdown: string): ImagePlaceholder[] {
   for (const match of markdown.matchAll(PLACEHOLDER_PATTERN)) {
     const raw = match[0];
     const trimmed = raw.trim();
-    const inside = trimmed.slice(1, -1);
-    const description = inside
+    const markerEnd = trimmed.indexOf("】");
+    const inside = trimmed.slice(1, markerEnd);
+    const trailingDescription = trimmed.slice(markerEnd + 1).trim();
+    const markerDescription = inside
       .replace(/^画像(?:プレースホルダー(?:（任意）)?|[0-9０-９①-㊿]+)?\s*(?:[:：])?\s*/, "")
-      .trim() || inside;
+      .trim();
+    const description = trailingDescription || markerDescription || inside;
     const occurrence = occurrences.get(description) ?? 0;
     occurrences.set(description, occurrence + 1);
     const start = match.index ?? 0;
