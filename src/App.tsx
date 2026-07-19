@@ -62,7 +62,9 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<"all" | ArticleStatus>("all");
   const [showPendingImagesOnly, setShowPendingImagesOnly] = useState(false);
   const [schedule, setSchedule] = useState<PublicationScheduleConfig>(() => loadPublicationSchedule(DEFAULT_SCHEDULE));
+  const [scheduleAccordionOpen, setScheduleAccordionOpen] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [returnScrollY, setReturnScrollY] = useState<number | null>(null);
   const [article, setArticle] = useState<ArticleContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [articleLoading, setArticleLoading] = useState(false);
@@ -141,6 +143,7 @@ export default function App() {
 
   const openArticle = useCallback(async (path: string) => {
     if (!client) return;
+    setReturnScrollY(window.scrollY);
     setSelectedPath(path);
     setArticle(null);
     setArticleLoading(true);
@@ -173,6 +176,16 @@ export default function App() {
   }, [client]);
 
   useEffect(() => {
+    if (selectedPath !== null || returnScrollY === null) return;
+    const scrollY = returnScrollY;
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY, left: 0, behavior: "auto" });
+      setReturnScrollY(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [returnScrollY, selectedPath]);
+
+  useEffect(() => {
     if (!returnPath || !client || showSettings) return;
     clearArticleReturnPath();
     setReturnPath("");
@@ -193,6 +206,7 @@ export default function App() {
     setPendingSnapshot(null);
     setSelectedPath(null);
     setArticle(null);
+    setReturnScrollY(null);
     setError(null);
     setSyncState({ phase: "idle", checkedAt: null, error: null });
     lastCheckedAtRef.current = 0;
@@ -207,6 +221,7 @@ export default function App() {
     setPendingSnapshot(null);
     setSelectedPath(null);
     setArticle(null);
+    setReturnScrollY(null);
     setError(null);
     setSyncState({ phase: "idle", checkedAt: null, error: null });
     lastCheckedAtRef.current = 0;
@@ -217,6 +232,7 @@ export default function App() {
     setShowSettings(true);
     setSelectedPath(null);
     setArticle(null);
+    setReturnScrollY(null);
     setError(null);
   };
 
@@ -299,7 +315,7 @@ export default function App() {
       {loading && <p className="loading">GitHub から記事一覧を読み込んでいます…</p>}
       <SyncStatus state={syncState} onRetry={reload} />
       {snapshot && <RepositoryWarnings snapshot={snapshot} />}
-      {snapshot && <DashboardPanel snapshot={snapshot} schedule={schedule} onScheduleChange={updateSchedule} client={client} onOpenArticle={openArticle} />}
+      {snapshot && <DashboardPanel snapshot={snapshot} schedule={schedule} onScheduleChange={updateSchedule} client={client} onOpenArticle={openArticle} scheduleAccordionOpen={scheduleAccordionOpen} onScheduleAccordionChange={setScheduleAccordionOpen} />}
       <HealthCheckPanel client={client} />
       <ImageInventoryPanel client={client} />
 
@@ -477,7 +493,7 @@ function imageInventoryIssueLabel(kind: ImageInventory["issues"][number]["kind"]
   return "状態のみ";
 }
 
-function DashboardPanel({ snapshot, schedule, onScheduleChange, client, onOpenArticle }: { snapshot: RepositorySnapshot; schedule: PublicationScheduleConfig; onScheduleChange: (next: PublicationScheduleConfig) => void; client: GithubClient; onOpenArticle: (path: string) => void }) {
+function DashboardPanel({ snapshot, schedule, onScheduleChange, client, onOpenArticle, scheduleAccordionOpen, onScheduleAccordionChange }: { snapshot: RepositorySnapshot; schedule: PublicationScheduleConfig; onScheduleChange: (next: PublicationScheduleConfig) => void; client: GithubClient; onOpenArticle: (path: string) => void; scheduleAccordionOpen: boolean; onScheduleAccordionChange: (open: boolean) => void }) {
   const summaries = snapshot.articles.reduce((result, article) => {
     result[article.status] += 1;
     return result;
@@ -511,7 +527,7 @@ function DashboardPanel({ snapshot, schedule, onScheduleChange, client, onOpenAr
         <DashboardMetric label="公開済み" value={summaries.published} tone="published" />
         <DashboardMetric label="画像未決定" value={pendingImages} tone="image" />
       </div>
-      <Accordion className="schedule-card" label="公開スケジュールを設定">
+      <Accordion className="schedule-card" label="公開スケジュールを設定" open={scheduleAccordionOpen} onOpenChange={onScheduleAccordionChange}>
         <p className="image-plan-intro">公開待ちの記事を予定日に並べます。全カテゴリでは <code>status.json</code> の全体公開順を優先し、未設定の記事はカテゴリ内の順番で後ろに続きます。設定はこの端末に保存されます。</p>
         <div className="schedule-fields">
           <label htmlFor="schedule-start">開始日時</label>
@@ -1028,13 +1044,19 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   );
 }
 
-function Accordion({ className, label, children }: { className: string; label: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+function Accordion({ className, label, children, open: controlledOpen, onOpenChange }: { className: string; label: string; children: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
   const contentId = useId();
+  const toggle = () => {
+    const next = !open;
+    if (onOpenChange) onOpenChange(next);
+    else setInternalOpen(next);
+  };
   return (
     <section className={`${className}${open ? " accordion-open" : ""}`}>
       <h2 className="accordion-heading">
-        <button className="accordion-trigger" type="button" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen((current) => !current)}>
+        <button className="accordion-trigger" type="button" aria-expanded={open} aria-controls={contentId} onClick={toggle}>
           {label}
         </button>
       </h2>
