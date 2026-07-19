@@ -61,6 +61,13 @@ export function extractFilenameOrder(path) {
   return order;
 }
 
+export function extractArticleTitle(markdown) {
+  const match = markdown.match(/^#{1,2}\s+(.+?)\s*$/m);
+  if (!match) return undefined;
+  const title = match[1].replace(/\s+#+\s*$/, "").trim();
+  return title || undefined;
+}
+
 export function parseDisneyReviewStatuses(readme) {
   const statuses = new Map();
   const sections = [];
@@ -133,8 +140,10 @@ export function buildStatusDocument(repoRoot, previousDocument = null) {
     const previous = previousDocument?.articles?.[path];
     const status = previous?.status === "published" || previous?.status === "draft" ? previous.status : derivedStatus;
     const queueOrder = extractFilenameOrder(path);
+    const title = extractArticleTitle(readFileSync(join(repoRoot, path), "utf8"));
     articles[path] = {
       status,
+      ...(title === undefined ? {} : { title }),
       ...(queueOrder === undefined ? {} : { queueOrder: queueEntry?.order ?? queueOrder }),
       ...(Number.isInteger(previous?.publicationOrder) && previous.publicationOrder > 0 ? { publicationOrder: previous.publicationOrder } : {}),
       publishedUrl: previous?.publishedUrl ?? null,

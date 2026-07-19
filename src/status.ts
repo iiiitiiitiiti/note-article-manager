@@ -28,6 +28,9 @@ export function validateStatusDocument(value: unknown): StatusDocument {
     if (typeof entry.status !== "string" || !VALID_STATUSES.has(entry.status)) {
       throw new Error(`status.json の status が不正です: ${path}`);
     }
+    if (entry.title !== undefined && (typeof entry.title !== "string" || entry.title.trim().length === 0)) {
+      throw new Error(`status.json の title が不正です: ${path}`);
+    }
     if (entry.queueOrder !== undefined && (!Number.isInteger(entry.queueOrder) || entry.queueOrder < 1)) {
       throw new Error(`status.json の queueOrder が不正です: ${path}`);
     }
@@ -46,6 +49,7 @@ export function validateStatusDocument(value: unknown): StatusDocument {
 
     articles[path] = {
       status: entry.status,
+      ...(entry.title === undefined ? {} : { title: entry.title }),
       ...(entry.queueOrder === undefined ? {} : { queueOrder: entry.queueOrder }),
       ...(entry.publicationOrder === undefined ? {} : { publicationOrder: entry.publicationOrder }),
       publishedUrl: entry.publishedUrl ?? null,
@@ -82,6 +86,7 @@ export function mergeArticlePaths(paths: string[], status: StatusDocument): {
       path,
       category,
       status: entry.status,
+      ...(entry.title === undefined ? {} : { title: entry.title }),
       queueOrder: entry.queueOrder,
       publicationOrder: entry.publicationOrder,
       publishedUrl: entry.publishedUrl,
