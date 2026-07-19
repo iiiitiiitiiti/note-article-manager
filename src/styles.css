@@ -47,6 +47,9 @@ h2 { font-size: 1.05rem; }
 .warning-panel { margin: 0 0 18px; border: 1px solid #e6c995; background: #fff8ea; color: #79521e; }
 .warning-panel p { margin: 4px 0 0; font-size: .9rem; }
 .error-notice { margin-bottom: 18px; border: 1px solid #d99387; background: #fff0ed; color: #8a2e24; }
+.error-notice p { margin: 6px 0 0; }
+.error-notice .error-next-step { color: #6f332d; font-size: .9rem; }
+.error-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .loading, .empty-state, .inline-message { color: #637068; }
 .settings-card { margin-top: 28px; border: 1px solid #dedbd2; background: #fffdf8; box-shadow: 0 16px 44px rgba(23, 63, 53, .08); }
 .settings-card p { color: #637068; }

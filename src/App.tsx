@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { GithubClient } from "./github";
+import { GithubApiError } from "./github-errors";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadToken, saveArticleReturnPath, saveToken } from "./storage";
@@ -35,17 +36,17 @@ export default function App() {
   const [article, setArticle] = useState<ArticleContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [articleLoading, setArticleLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Error | null>(null);
   const client = useMemo(() => (token ? new GithubClient(token) : null), [token]);
 
   const reload = useCallback(async () => {
     if (!client) return;
     setLoading(true);
-    setError("");
+    setError(null);
     try {
       setSnapshot(await client.loadSnapshot());
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "記事一覧の取得に失敗しました。");
+      setError(toError(loadError, "記事一覧の取得に失敗しました。"));
     } finally {
       setLoading(false);
     }
@@ -60,22 +61,29 @@ export default function App() {
     setSelectedPath(path);
     setArticle(null);
     setArticleLoading(true);
-    setError("");
+    setError(null);
     try {
       const markdown = await client.getArticle(path);
       const initialArticle = renderArticle(markdown, path);
       const imageResults = await Promise.allSettled(initialArticle.localImagePaths.map(async (imagePath) => [imagePath, await client.getImageDataUrl(imagePath)] as const));
       const imageSources: Record<string, string> = {};
       const unavailableImages: string[] = [];
+      const unavailableImageErrors: Error[] = [];
       for (const result of imageResults) {
         if (result.status === "fulfilled") imageSources[result.value[0]] = result.value[1];
-        else unavailableImages.push(result.reason instanceof Error ? result.reason.message : "画像");
+        else {
+          const imageError = toError(result.reason, "画像を取得できませんでした。");
+          unavailableImages.push(imageError.message);
+          unavailableImageErrors.push(imageError);
+        }
       }
       const nextArticle = renderArticle(markdown, path, imageSources);
-      if (unavailableImages.length > 0) nextArticle.warnings.push("一部の画像をプレビューできません。画像ファイルの形式・サイズ・PAT権限を確認してください。");
+      if (unavailableImages.length > 0) nextArticle.warnings.push(`画像のプレビューに失敗しました。${unavailableImages.join(" / ")}`);
       setArticle(nextArticle);
+      const actionableImageError = unavailableImageErrors.find((imageError) => imageError instanceof GithubApiError && imageError.action !== "none");
+      if (actionableImageError) setError(actionableImageError);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "記事本文の取得に失敗しました。");
+      setError(toError(loadError, "記事本文の取得に失敗しました。"));
     } finally {
       setArticleLoading(false);
     }
@@ -95,6 +103,7 @@ export default function App() {
     setSnapshot(null);
     setSelectedPath(null);
     setArticle(null);
+    setError(null);
   };
 
   const handleTokenClear = () => {
@@ -105,6 +114,14 @@ export default function App() {
     setSnapshot(null);
     setSelectedPath(null);
     setArticle(null);
+    setError(null);
+  };
+
+  const openSettings = () => {
+    setShowSettings(true);
+    setSelectedPath(null);
+    setArticle(null);
+    setError(null);
   };
 
   if (showSettings || !token) {
@@ -114,7 +131,7 @@ export default function App() {
     return <SettingsScreen hasToken={false} onSave={handleTokenSave} onResume={() => setShowSettings(false)} onClear={handleTokenClear} />;
   }
 
-  if (selectedPath && (article || articleLoading)) {
+  if (selectedPath && (article || articleLoading || error)) {
     return (
       <ArticleScreen
         article={article}
@@ -123,7 +140,7 @@ export default function App() {
         currentStatus={snapshot?.articles.find((item) => item.path === selectedPath)}
         client={client}
         imageStatus={snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }}
-        onBack={() => { clearArticleReturnPath(); setSelectedPath(null); setArticle(null); setError(""); }}
+        onBack={() => { clearArticleReturnPath(); setSelectedPath(null); setArticle(null); setError(null); }}
         onPrepareNoteNavigation={() => saveArticleReturnPath(selectedPath)}
         onImageStatusSaved={(imageStatus) => setSnapshot((current) => current ? { ...current, imageStatus } : current)}
         onArticleUpdated={() => void openArticle(selectedPath)}
@@ -138,6 +155,8 @@ export default function App() {
           } : current);
         }}
         error={error}
+        onRetry={() => void openArticle(selectedPath)}
+        onOpenSettings={openSettings}
       />
     );
   }
@@ -154,11 +173,11 @@ export default function App() {
         </div>
         <div className="header-actions">
           <button className="icon-button" type="button" onClick={() => void reload()} disabled={loading} aria-label="再読み込み">↻</button>
-          <button className="text-button" type="button" onClick={() => setShowSettings(true)}>設定</button>
+          <button className="text-button" type="button" onClick={openSettings}>設定</button>
         </div>
       </header>
 
-      {error && <ErrorNotice message={error} />}
+      {error && <ErrorNotice error={error} onRetry={() => void reload()} onOpenSettings={openSettings} />}
       {loading && <p className="loading">GitHub から記事一覧を読み込んでいます…</p>}
       {snapshot && <RepositoryWarnings snapshot={snapshot} />}
 
@@ -237,7 +256,7 @@ function ArticleListItem({ article, onOpen }: { article: ArticlePath; onOpen: (p
   );
 }
 
-function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, client, imageStatus, onBack, onPrepareNoteNavigation, onSaved, onImageStatusSaved, onArticleUpdated, error }: {
+function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, client, imageStatus, onBack, onPrepareNoteNavigation, onSaved, onImageStatusSaved, onArticleUpdated, error, onRetry, onOpenSettings }: {
   article: ArticleContent | null;
   articleLoading: boolean;
   selectedPath: string;
@@ -249,10 +268,13 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   onSaved: (document: RepositorySnapshot["status"]) => void;
   onImageStatusSaved: (document: ImageStatusDocument) => void;
   onArticleUpdated: () => void;
-  error: string;
+  error: Error | null;
+  onRetry: () => void;
+  onOpenSettings: () => void;
 }) {
   const [manualCopy, setManualCopy] = useState<{ label: string; text: string; openNoteAfterCopy: boolean } | null>(null);
   const [message, setMessage] = useState("");
+  const [operationError, setOperationError] = useState<{ error: Error; retry: () => void } | null>(null);
   const [publishedUrl, setPublishedUrl] = useState(currentStatus?.publishedUrl ?? "");
   const [saving, setSaving] = useState(false);
   const [imageBusy, setImageBusy] = useState("");
@@ -264,6 +286,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
 
   const copy = (label: string, text: string, openNoteAfterCopy = false) => {
     setMessage("");
+    setOperationError(null);
     setManualCopy(null);
     if (!navigator.clipboard?.writeText) {
       setManualCopy({ label, text, openNoteAfterCopy });
@@ -284,6 +307,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
     if (!article || !isHttpUrl(publishedUrl)) return;
     setSaving(true);
     setMessage("");
+    setOperationError(null);
     try {
       const updated = await client.updateArticleStatus(selectedPath, {
         status: "published",
@@ -293,7 +317,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
       onSaved(updated);
       setMessage("公開済みとして保存しました。");
     } catch (saveError) {
-      setMessage(saveError instanceof Error ? saveError.message : "保存に失敗しました。");
+      setOperationError({ error: toError(saveError, "保存に失敗しました。"), retry: () => void savePublished() });
     } finally {
       setSaving(false);
     }
@@ -302,12 +326,13 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   const saveImageDecision = async (taskId: string, decision: ImageDecision) => {
     setImageBusy(taskId);
     setMessage("");
+    setOperationError(null);
     try {
       const updated = await client.updateImageTaskState(selectedPath, taskId, { decision, updatedAt: new Date().toISOString() });
       onImageStatusSaved(updated);
       setMessage(`画像の判断を「${IMAGE_DECISION_LABELS[decision]}」として保存しました。`);
     } catch (saveError) {
-      setMessage(saveError instanceof Error ? saveError.message : "画像の判断の保存に失敗しました。");
+      setOperationError({ error: toError(saveError, "画像の判断の保存に失敗しました。"), retry: () => void saveImageDecision(taskId, decision) });
     } finally {
       setImageBusy("");
     }
@@ -326,6 +351,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
     }
     setImageBusy(taskId);
     setMessage("");
+    setOperationError(null);
     try {
       const assetPath = buildImageAssetPath(selectedPath, taskId, file.name);
       await client.uploadImage(assetPath, new Uint8Array(await file.arrayBuffer()));
@@ -341,7 +367,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
       onArticleUpdated();
       setMessage("画像を登録し、記事本文へ差し込みました。");
     } catch (uploadError) {
-      setMessage(uploadError instanceof Error ? uploadError.message : "画像の登録に失敗しました。");
+      setOperationError({ error: toError(uploadError, "画像の登録に失敗しました。"), retry: () => void uploadImage(taskId, file) });
     } finally {
       setImageBusy("");
     }
@@ -353,7 +379,8 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
         <button className="back-button" type="button" onClick={onBack}>← 一覧に戻る</button>
         <span className="article-row-path">{selectedPath}</span>
       </header>
-      {error && <ErrorNotice message={error} />}
+      {error && <ErrorNotice error={error} onRetry={onRetry} onOpenSettings={onOpenSettings} />}
+      {operationError && <ErrorNotice error={operationError.error} onRetry={operationError.retry} onOpenSettings={onOpenSettings} />}
       {articleLoading && <p className="loading">本文を読み込んでいます…</p>}
       {article && (
         <>
@@ -448,8 +475,31 @@ function StatusBadge({ status }: { status: ArticlePath["status"] }) {
   return <span className={`status-badge status-${status}`}>{labels[status]}</span>;
 }
 
-function ErrorNotice({ message }: { message: string }) {
-  return <div className="error-notice" role="alert">{message}</div>;
+function ErrorNotice({ error, onRetry, onOpenSettings }: { error: Error; onRetry?: () => void; onOpenSettings?: () => void }) {
+  const githubError = error instanceof GithubApiError ? error : null;
+  const showRetry = Boolean(onRetry && (!githubError || githubError.action === "retry"));
+  const showSettings = Boolean(onOpenSettings && githubError?.action === "settings");
+  return (
+    <div className="error-notice" role="alert">
+      {githubError ? (
+        <>
+          <strong>対象: {githubError.operation}</strong>
+          <p className="error-reason">{githubError.reason}</p>
+          <p className="error-next-step"><strong>次の操作:</strong> {githubError.nextStep}</p>
+        </>
+      ) : <p className="error-reason">{error.message}</p>}
+      {(showRetry || showSettings) && (
+        <div className="error-actions">
+          {showRetry && <button className="secondary-button" type="button" onClick={onRetry}>再試行</button>}
+          {showSettings && <button className="secondary-button" type="button" onClick={onOpenSettings}>設定を開く</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function toError(value: unknown, fallback: string): Error {
+  return value instanceof Error ? value : new Error(fallback);
 }
 
 function isHttpUrl(value: string): boolean {
