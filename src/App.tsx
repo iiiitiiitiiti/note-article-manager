@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { GithubClient } from "./github";
 import { GithubApiError } from "./github-errors";
-import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES } from "./image-plan";
+import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadToken, saveArticleReturnPath, saveToken } from "./storage";
 
 const NOTE_COMPOSE_URL = "https://note.com/intent/post";
-import type { ArticleContent, ArticlePath, ImageDecision, ImageRegistrationStage, ImageStatusDocument, RepositorySnapshot } from "./types";
+import type { ArticleContent, ArticlePath, ImageDecision, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   design: "design",
@@ -45,6 +45,7 @@ export default function App() {
   const [returnPath, setReturnPath] = useState(loadArticleReturnPath);
   const [snapshot, setSnapshot] = useState<RepositorySnapshot | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("design");
+  const [showPendingImagesOnly, setShowPendingImagesOnly] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [article, setArticle] = useState<ArticleContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -175,7 +176,11 @@ export default function App() {
   }
 
   const categories = [...new Set(snapshot?.articles.map((item) => item.category) ?? [])];
-  const visibleArticles = (snapshot?.articles ?? []).filter((item) => item.category === selectedCategory);
+  const categoryArticles = (snapshot?.articles ?? []).filter((item) => item.category === selectedCategory);
+  const pendingImageArticleCount = categoryArticles.filter((item) => summarizeImageTasks(snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }, item.path).pending > 0).length;
+  const visibleArticles = showPendingImagesOnly
+    ? categoryArticles.filter((item) => summarizeImageTasks(snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }, item.path).pending > 0)
+    : categoryArticles;
 
   return (
     <main className="app-shell">
@@ -208,11 +213,19 @@ export default function App() {
                 <span>{snapshot.articles.filter((item) => item.category === category).length}</span>
               </button>
             ))}
+            <button
+              className={showPendingImagesOnly ? "category-filter active" : "category-filter"}
+              type="button"
+              aria-pressed={showPendingImagesOnly}
+              onClick={() => setShowPendingImagesOnly((current) => !current)}
+            >
+              画像未決定のみ<span>{pendingImageArticleCount}</span>
+            </button>
           </nav>
 
           <section className="article-list" aria-label={`${CATEGORY_LABELS[selectedCategory] ?? selectedCategory}の記事`}>
-            {visibleArticles.length === 0 && <p className="empty-state">この種別の記事はありません。</p>}
-            {visibleArticles.map((item) => <ArticleListItem key={item.path} article={item} onOpen={openArticle} />)}
+            {visibleArticles.length === 0 && <p className="empty-state">{showPendingImagesOnly ? "画像が未決定の記事はありません。" : "この種別の記事はありません。"}</p>}
+            {visibleArticles.map((item) => <ArticleListItem key={item.path} article={item} imageProgress={summarizeImageTasks(snapshot.imageStatus, item.path)} onOpen={openArticle} />)}
           </section>
         </>
       )}
@@ -256,7 +269,7 @@ function RepositoryWarnings({ snapshot }: { snapshot: RepositorySnapshot }) {
   );
 }
 
-function ArticleListItem({ article, onOpen }: { article: ArticlePath; onOpen: (path: string) => void }) {
+function ArticleListItem({ article, imageProgress, onOpen }: { article: ArticlePath; imageProgress: ImageProgressSummary; onOpen: (path: string) => void }) {
   const filename = article.path.split("/").at(-1)?.replace(/\.md$/, "") ?? article.path;
   return (
     <button className="article-row" type="button" onClick={() => void onOpen(article.path)}>
@@ -264,8 +277,24 @@ function ArticleListItem({ article, onOpen }: { article: ArticlePath; onOpen: (p
         <span className="article-row-title">{article.queueOrder ? `${String(article.queueOrder).padStart(2, "0")} ` : ""}{filename.replace(/^\d+[_-]?/, "").replace(/[_-]+/g, " ")}</span>
         <span className="article-row-path">{article.path}</span>
       </span>
-      <StatusBadge status={article.status} />
+      <span className="article-row-side">
+        <StatusBadge status={article.status} />
+        <ImageProgressBadge summary={imageProgress} />
+      </span>
     </button>
+  );
+}
+
+function ImageProgressBadge({ summary }: { summary: ImageProgressSummary }) {
+  if (summary.total === 0) {
+    return <span className="image-progress image-progress-none" role="group" aria-label="画像準備: 画像タスクなし">画像準備なし</span>;
+  }
+  const label = `画像準備: 全${summary.total}件、未決定${summary.pending}件、AI生成${summary.generate}件、自分で用意${summary.provide}件、不要${summary.skip}件`;
+  return (
+    <span className={summary.pending > 0 ? "image-progress image-progress-pending" : "image-progress"} role="group" aria-label={label}>
+      <span>画像 {summary.pending > 0 ? `未決定 ${summary.pending}/${summary.total}` : `${summary.total}件確認済み`}</span>
+      <span className="image-progress-details" aria-hidden="true">AI {summary.generate}・用意 {summary.provide}・不要 {summary.skip}</span>
+    </span>
   );
 }
 

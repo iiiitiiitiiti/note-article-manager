@@ -1,4 +1,4 @@
-import type { ImageDecision, ImagePlaceholder, ImageRegistrationStage, ImageStatusArticle, ImageStatusDocument, ImageTaskState } from "./types";
+import type { ImageDecision, ImagePlaceholder, ImageProgressSummary, ImageRegistrationStage, ImageStatusArticle, ImageStatusDocument, ImageTaskState } from "./types";
 
 export const IMAGE_STATUS_PATH = "image-status.json";
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -94,6 +94,15 @@ export function createImageTaskId(description: string, occurrence: number): stri
 
 export function getImageTaskState(document: ImageStatusDocument, articlePath: string, taskId: string): ImageTaskState {
   return document.articles[articlePath]?.tasks[taskId] ?? { decision: "pending", assetPath: null, registrationStage: "not-started", updatedAt: null };
+}
+
+export function summarizeImageTasks(document: ImageStatusDocument, articlePath: string): ImageProgressSummary {
+  const summary: ImageProgressSummary = { total: 0, pending: 0, generate: 0, provide: 0, skip: 0 };
+  for (const task of Object.values(document.articles[articlePath]?.tasks ?? {})) {
+    summary.total += 1;
+    summary[task.decision] += 1;
+  }
+  return summary;
 }
 
 export function withImageTaskState(

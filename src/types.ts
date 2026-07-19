@@ -32,6 +32,14 @@ export interface ImageStatusDocument {
   articles: Record<string, ImageStatusArticle>;
 }
 
+export interface ImageProgressSummary {
+  total: number;
+  pending: number;
+  generate: number;
+  provide: number;
+  skip: number;
+}
+
 export interface ArticlePath {
   path: string;
   category: string;
