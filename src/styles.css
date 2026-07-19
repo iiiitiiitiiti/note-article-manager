@@ -91,7 +91,8 @@ h2 { font-size: 1.05rem; }
 .schedule-list-item { align-items: flex-start; }
 .schedule-list time { min-width: 150px; color: #98551e; font-size: .82rem; font-weight: 700; }
 .schedule-item-details { display: grid; gap: 2px; min-width: 0; }
-.schedule-item-title { overflow-wrap: anywhere; }
+.schedule-article-link { min-width: 0; border: 0; padding: 0; background: transparent; color: #173f35; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+.schedule-article-link:focus-visible { outline: 3px solid rgba(179, 93, 56, .3); outline-offset: 2px; }
 .schedule-item-category { color: #637068; font-size: .78rem; }
 .notification-settings { margin-top: 16px; border-top: 1px solid #e5e1d8; padding-top: 14px; }
 .notification-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -201,6 +202,9 @@ input:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3p
   .app-shell { padding: 48px 30px 80px; }
   .article-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .article-row { min-height: 92px; }
+  .schedule-list-item { flex-wrap: nowrap; }
+  .schedule-item-details { flex: 1 1 0; }
+  .schedule-article-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 @media (max-width: 480px) {
   .app-header { flex-wrap: wrap; }
