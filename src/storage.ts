@@ -1,5 +1,6 @@
 const TOKEN_KEY = "note-article-manager:github-pat";
 const ARTICLE_RETURN_PATH_KEY = "note-article-manager:article-return-path";
+const NOTE_COMPOSER_ARTICLE_KEY = "note-article-manager:note-composer-article";
 const PUBLICATION_SCHEDULE_KEY = "note-article-manager:publication-schedule";
 
 export function loadToken(): string {
@@ -35,6 +36,22 @@ export function clearArticleReturnPath(): void {
     sessionStorage.removeItem(ARTICLE_RETURN_PATH_KEY);
   } catch {
     // sessionStorage is optional.
+  }
+}
+
+export function saveNoteComposerArticle(path: string): void {
+  try {
+    sessionStorage.setItem(NOTE_COMPOSER_ARTICLE_KEY, path);
+  } catch {
+    // sessionStorage is optional.
+  }
+}
+
+export function loadNoteComposerArticle(): string {
+  try {
+    return sessionStorage.getItem(NOTE_COMPOSER_ARTICLE_KEY) ?? "";
+  } catch {
+    return "";
   }
 }
 
