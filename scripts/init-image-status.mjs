@@ -3,16 +3,20 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { discoverArticlePaths } from "./init-status.mjs";
 
-const PLACEHOLDER_PATTERN = /^[ \t]*【画像[^】]*】[ \t]*$/gm;
+const PLACEHOLDER_PATTERN = /^[ \t]*【画像[^】]*】[^\r\n]*$/gm;
 
 export function parseImagePlaceholders(markdown) {
   const occurrences = new Map();
   const placeholders = [];
   for (const match of markdown.matchAll(PLACEHOLDER_PATTERN)) {
-    const inside = match[0].trim().slice(1, -1);
-    const description = inside
+    const trimmed = match[0].trim();
+    const markerEnd = trimmed.indexOf("】");
+    const inside = trimmed.slice(1, markerEnd);
+    const trailingDescription = trimmed.slice(markerEnd + 1).trim();
+    const markerDescription = inside
       .replace(/^画像(?:プレースホルダー(?:（任意）)?|[0-9０-９①-㊿]+)?\s*(?:[:：])?\s*/, "")
-      .trim() || inside;
+      .trim();
+    const description = trailingDescription || markerDescription || inside;
     const occurrence = occurrences.get(description) ?? 0;
     occurrences.set(description, occurrence + 1);
     placeholders.push({ id: createImageTaskId(description, occurrence), description });

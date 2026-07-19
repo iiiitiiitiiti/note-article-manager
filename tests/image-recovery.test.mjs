@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { filterArticleImageAssets, getImageTaskState, replaceImagePlaceholder, summarizeImageTasks, validateImageStatusDocument, withImageTaskState } from "../src/image-plan.ts";
+import { filterArticleImageAssets, getImageTaskState, parseImagePlaceholders, replaceImagePlaceholder, summarizeImageTasks, validateImageStatusDocument, withImageTaskState } from "../src/image-plan.ts";
 
 const articlePath = "disney/11_disney-omnimover-article.md";
 const taskId = "image-12345678-1";
+
+test("image placeholders can keep their description after the marker", () => {
+  const placeholders = parseImagePlaceholders("【画像】見出し画像の説明。\n");
+
+  assert.equal(placeholders.length, 1);
+  assert.equal(placeholders[0].description, "見出し画像の説明。");
+  assert.equal(placeholders[0].raw, "【画像】見出し画像の説明。");
+});
 
 test("legacy image status with an asset is treated as completed", () => {
   const document = validateImageStatusDocument({
