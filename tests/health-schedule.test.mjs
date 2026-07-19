@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { inspectArticleHealth } from "../src/health.ts";
 import { createImageTaskId } from "../src/image-plan.ts";
-import { buildPublicationSchedule } from "../src/schedule.ts";
+import { buildPublicationSchedule, hasMissingPublicationOrders } from "../src/schedule.ts";
 
 const emptyImageStatus = { schemaVersion: 1, articles: {} };
 
@@ -45,7 +45,18 @@ test("all-category publication schedules use the explicit mixed publication orde
   ];
   const schedule = buildPublicationSchedule(articles, { startAt: "2026-07-20T09:00:00Z", intervalDays: 7, category: "all", frequency: "weekly" });
 
-  assert.deepEqual(schedule.map((item) => item.path), ["design/01_design.md", "book-review/01_book.md", "essay/essay.md"]);
+  assert.deepEqual(schedule.map((item) => item.path), ["design/01_design.md", "book-review/01_book.md"]);
+  assert.equal(hasMissingPublicationOrders(articles, "all"), false);
+});
+
+test("missing publication order warning ignores essays but detects other queued articles", () => {
+  const articles = [
+    { path: "essay/essay.md", category: "essay", status: "queued", publishedUrl: null, publishedAt: null },
+    { path: "design/01_design.md", category: "design", status: "queued", publishedUrl: null, publishedAt: null },
+  ];
+
+  assert.equal(hasMissingPublicationOrders(articles, "all"), true);
+  assert.equal(hasMissingPublicationOrders([articles[0]], "all"), false);
 });
 
 test("weekday schedules assign one article to each selected weekday", () => {

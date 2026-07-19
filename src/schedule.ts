@@ -27,7 +27,7 @@ export function buildPublicationSchedule(articles: ArticlePath[], config: Public
   const weekdays = normalizeWeekdays(config.weekdays);
   if (frequency === "weekdays" && weekdays.length === 0) return [];
   const targets = articles
-    .filter((article) => article.status === "queued" && (config.category === "all" || article.category === config.category))
+    .filter((article) => article.status === "queued" && article.category !== "essay" && (config.category === "all" || article.category === config.category))
     .sort((left, right) => compareArticleOrder(left, right, config.category === "all"));
   return targets.flatMap((article, index) => {
     const scheduledAt = getScheduledAt(start, index, frequency, config.intervalDays, weekdays);
@@ -39,6 +39,10 @@ export function buildPublicationSchedule(articles: ArticlePath[], config: Public
       scheduledAt: scheduledAt.toISOString(),
     }] : [];
   });
+}
+
+export function hasMissingPublicationOrders(articles: ArticlePath[], category: string): boolean {
+  return category === "all" && articles.some((article) => article.status === "queued" && article.category !== "essay" && article.publicationOrder === undefined);
 }
 
 function compareArticleOrder(left: ArticlePath, right: ArticlePath, mixedCategories: boolean): number {
