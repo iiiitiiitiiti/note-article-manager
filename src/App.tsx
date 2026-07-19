@@ -5,7 +5,7 @@ import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKe
 import { buildPublicationSchedule, DEFAULT_SCHEDULE, getPublicationScheduleFrequency, hasMissingPublicationOrders, WEEKDAY_OPTIONS } from "./schedule";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
-import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadPublicationSchedule, loadToken, saveArticleReturnPath, savePublicationSchedule, saveToken } from "./storage";
+import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadNoteComposerArticle, loadPublicationSchedule, loadToken, saveArticleReturnPath, saveNoteComposerArticle, savePublicationSchedule, saveToken } from "./storage";
 
 const NOTE_APP_URL = "https://note.com/intent/post";
 import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, PublicationScheduleConfig, PublicationScheduleFrequency, PushSubscriptionData, RepositorySnapshot } from "./types";
@@ -774,6 +774,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   onApplyPendingSnapshot: () => void;
 }) {
   const [manualCopy, setManualCopy] = useState<{ label: string; text: string; openNoteAfterCopy: boolean } | null>(null);
+  const [noteComposerOpened, setNoteComposerOpened] = useState(() => loadNoteComposerArticle() === selectedPath);
   const [message, setMessage] = useState("");
   const [operationError, setOperationError] = useState<ArticleOperationError | null>(null);
   const [publishedUrl, setPublishedUrl] = useState(currentStatus?.publishedUrl ?? "");
@@ -786,6 +787,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   useEffect(() => {
     setOrphanImages({});
     setTransferMode("note");
+    setNoteComposerOpened(loadNoteComposerArticle() === selectedPath);
   }, [selectedPath]);
 
   const reloadArticle = () => {
@@ -795,15 +797,23 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   };
 
   const openNote = () => {
+    saveNoteComposerArticle(selectedPath);
+    setNoteComposerOpened(true);
     onPrepareNoteNavigation();
     window.location.assign(NOTE_APP_URL);
   };
 
   const copyAndOpenNote = (event: React.MouseEvent<HTMLAnchorElement>, label: string, text: string) => {
     if (!navigator.clipboard?.writeText) event.preventDefault();
-    if (!event.defaultPrevented) onPrepareNoteNavigation();
+    if (!event.defaultPrevented) {
+      saveNoteComposerArticle(selectedPath);
+      setNoteComposerOpened(true);
+      onPrepareNoteNavigation();
+    }
     copy(label, text, true);
   };
+
+  const copyWithoutOpeningNote = (label: string, text: string) => copy(label, text);
 
   const copy = (label: string, text: string, openNoteAfterCopy = false) => {
     setMessage("");
@@ -987,17 +997,18 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
               <button className={transferMode === "markdown" ? "mode-button active" : "mode-button"} type="button" aria-pressed={transferMode === "markdown"} onClick={() => setTransferMode("markdown")}>原文Markdown</button>
             </div>
             <div className="transfer-actions">
-              <a className="primary-button" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer" onClick={(event) => copyAndOpenNote(event, "タイトル", article.title)}>タイトルをコピー</a>
-              <a className="secondary-button" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer" aria-disabled={transferMode === "note" && article.warningDetails.length > 0} onClick={(event) => {
+              {noteComposerOpened ? <button className="primary-button" type="button" onClick={() => copyWithoutOpeningNote("タイトル", article.title)}>タイトルをコピー</button> : <a className="primary-button" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer" onClick={(event) => copyAndOpenNote(event, "タイトル", article.title)}>タイトルをコピー</a>}
+              {noteComposerOpened ? <button className="secondary-button" type="button" disabled={transferMode === "note" && article.warningDetails.length > 0} onClick={() => copyWithoutOpeningNote(transferMode === "note" ? "note用本文" : "原文Markdown", transferMode === "note" ? article.body : article.sourceMarkdown)}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</button> : <a className="secondary-button" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer" aria-disabled={transferMode === "note" && article.warningDetails.length > 0} onClick={(event) => {
                 if (transferMode === "note" && article.warningDetails.length > 0) {
                   event.preventDefault();
                   return;
                 }
                 copyAndOpenNote(event, transferMode === "note" ? "note用本文" : "原文Markdown", transferMode === "note" ? article.body : article.sourceMarkdown);
-              }}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</a>
+              }}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</a>}
             </div>
             {transferMode === "note" && article.warningDetails.length > 0 && <p className="inline-message transfer-blocked" role="status">note用本文は要手動対応の要素があるためコピーできません。原文Markdownをコピーするか、下の対象を確認してください。</p>}
             {message && <p className="inline-message" role="status">{message}</p>}
+            {noteComposerOpened && <p className="inline-message" role="status">noteの執筆画面を開いたため、以降のコピーでは新しい執筆画面を開きません。noteアプリに戻って貼り付けてください。</p>}
             {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} onOpenNote={manualCopy.openNoteAfterCopy ? openNote : undefined} />}
             {article.warningDetails.length > 0 && <ul className="warning-list">{article.warningDetails.map((warning) => <li key={`${warning.kind}-${warning.line}-${warning.target}`}><strong>{warning.message}</strong> <span>{warning.target}</span><br /><span>{warning.action}</span></li>)}</ul>}
           </section>

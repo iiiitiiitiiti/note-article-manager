@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadToken, saveArticleReturnPath, saveToken } from "../src/storage.ts";
+import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadNoteComposerArticle, loadToken, saveArticleReturnPath, saveNoteComposerArticle, saveToken } from "../src/storage.ts";
 
 class MemoryStorage {
   values = new Map();
@@ -17,8 +17,10 @@ test("saved PAT and article return path remain available through the storage fal
   try {
     saveToken("  github_pat_test  ");
     saveArticleReturnPath("disney/01_one.md");
+    saveNoteComposerArticle("disney/01_one.md");
     assert.equal(loadToken(), "github_pat_test");
     assert.equal(loadArticleReturnPath(), "disney/01_one.md");
+    assert.equal(loadNoteComposerArticle(), "disney/01_one.md");
     clearArticleReturnPath();
     clearToken();
     assert.equal(loadToken(), "");
