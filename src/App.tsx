@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { GithubClient, type ConnectionTestResult } from "./github";
 import { GithubApiError } from "./github-errors";
-import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKey, isNotificationConfigured, isPushSupported, isStandalonePwa, requiresStandalonePwa, subscribeToPublicationNotifications, unsubscribeFromPublicationNotifications } from "./notifications";
+import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKey, isNotificationConfigured, isPushSupported, requiresStandalonePwa, subscribeToPublicationNotifications, unsubscribeFromPublicationNotifications } from "./notifications";
 import { buildPublicationSchedule, DEFAULT_SCHEDULE, getPublicationScheduleFrequency, hasMissingPublicationOrders, WEEKDAY_OPTIONS } from "./schedule";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
@@ -774,7 +774,6 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   onApplyPendingSnapshot: () => void;
 }) {
   const [manualCopy, setManualCopy] = useState<{ label: string; text: string; openNoteAfterCopy: boolean } | null>(null);
-  const [noteOpenReady, setNoteOpenReady] = useState(false);
   const [message, setMessage] = useState("");
   const [operationError, setOperationError] = useState<ArticleOperationError | null>(null);
   const [publishedUrl, setPublishedUrl] = useState(currentStatus?.publishedUrl ?? "");
@@ -787,7 +786,6 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   useEffect(() => {
     setOrphanImages({});
     setTransferMode("note");
-    setNoteOpenReady(false);
   }, [selectedPath]);
 
   const reloadArticle = () => {
@@ -797,16 +795,20 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   };
 
   const openNote = () => {
-    setNoteOpenReady(false);
     onPrepareNoteNavigation();
     window.location.assign(NOTE_APP_URL);
+  };
+
+  const copyAndOpenNote = (event: React.MouseEvent<HTMLAnchorElement>, label: string, text: string) => {
+    if (!navigator.clipboard?.writeText) event.preventDefault();
+    if (!event.defaultPrevented) onPrepareNoteNavigation();
+    copy(label, text, true);
   };
 
   const copy = (label: string, text: string, openNoteAfterCopy = false) => {
     setMessage("");
     setOperationError(null);
     setManualCopy(null);
-    setNoteOpenReady(false);
     if (!navigator.clipboard?.writeText) {
       setManualCopy({ label, text, openNoteAfterCopy });
       return;
@@ -814,13 +816,6 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
     void navigator.clipboard.writeText(text).then(
       () => {
         setMessage(`${label}をコピーしました。`);
-        if (openNoteAfterCopy) {
-          if (isStandalonePwa()) {
-            setNoteOpenReady(true);
-          } else {
-            openNote();
-          }
-        }
       },
       () => setManualCopy({ label, text, openNoteAfterCopy }),
     );
@@ -992,12 +987,17 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
               <button className={transferMode === "markdown" ? "mode-button active" : "mode-button"} type="button" aria-pressed={transferMode === "markdown"} onClick={() => setTransferMode("markdown")}>原文Markdown</button>
             </div>
             <div className="transfer-actions">
-              <button className="primary-button" type="button" onClick={() => copy("タイトル", article.title, true)}>タイトルをコピー</button>
-              <button className="secondary-button" type="button" disabled={transferMode === "note" && article.warningDetails.length > 0} onClick={() => copy(transferMode === "note" ? "note用本文" : "原文Markdown", transferMode === "note" ? article.body : article.sourceMarkdown, true)}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</button>
+              <a className="primary-button" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer" onClick={(event) => copyAndOpenNote(event, "タイトル", article.title)}>タイトルをコピー</a>
+              <a className="secondary-button" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer" aria-disabled={transferMode === "note" && article.warningDetails.length > 0} onClick={(event) => {
+                if (transferMode === "note" && article.warningDetails.length > 0) {
+                  event.preventDefault();
+                  return;
+                }
+                copyAndOpenNote(event, transferMode === "note" ? "note用本文" : "原文Markdown", transferMode === "note" ? article.body : article.sourceMarkdown);
+              }}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</a>
             </div>
             {transferMode === "note" && article.warningDetails.length > 0 && <p className="inline-message transfer-blocked" role="status">note用本文は要手動対応の要素があるためコピーできません。原文Markdownをコピーするか、下の対象を確認してください。</p>}
             {message && <p className="inline-message" role="status">{message}</p>}
-            {noteOpenReady && <div className="note-open-action"><button className="secondary-button" type="button" onClick={openNote}>noteアプリを開く</button></div>}
             {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} onOpenNote={manualCopy.openNoteAfterCopy ? openNote : undefined} />}
             {article.warningDetails.length > 0 && <ul className="warning-list">{article.warningDetails.map((warning) => <li key={`${warning.kind}-${warning.line}-${warning.target}`}><strong>{warning.message}</strong> <span>{warning.target}</span><br /><span>{warning.action}</span></li>)}</ul>}
           </section>
@@ -1086,7 +1086,7 @@ function ManualCopy({ label, text, onClose, onOpenNote }: { label: string; text:
       <div className="manual-copy-heading">
         <strong>{label}を手動コピー</strong>
         <div className="manual-copy-actions">
-          {onOpenNote && <button className="secondary-button" type="button" onClick={onOpenNote}>{isStandalonePwa() ? "noteアプリを開く" : "noteを開く"}</button>}
+          {onOpenNote && <button className="secondary-button" type="button" onClick={onOpenNote}>noteを開く</button>}
           <button type="button" onClick={onClose}>閉じる</button>
         </div>
       </div>
