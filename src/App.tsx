@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { GithubClient, type ConnectionTestResult } from "./github";
 import { GithubApiError } from "./github-errors";
 import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKey, isNotificationConfigured, isPushSupported, requiresStandalonePwa, subscribeToPublicationNotifications, unsubscribeFromPublicationNotifications } from "./notifications";
-import { buildPublicationSchedule, DEFAULT_SCHEDULE, getPublicationScheduleFrequency, WEEKDAY_OPTIONS } from "./schedule";
+import { buildPublicationSchedule, DEFAULT_SCHEDULE, getPublicationScheduleFrequency, hasMissingPublicationOrders, WEEKDAY_OPTIONS } from "./schedule";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadPublicationSchedule, loadToken, saveArticleReturnPath, savePublicationSchedule, saveToken } from "./storage";
@@ -486,8 +486,8 @@ function DashboardPanel({ snapshot, schedule, onScheduleChange, client }: { snap
   const scheduled = buildPublicationSchedule(snapshot.articles, schedule);
   const categories = [...new Set(snapshot.articles.map((article) => article.category))];
   const frequency = getPublicationScheduleFrequency(schedule);
-  const queuedCount = snapshot.articles.filter((article) => article.status === "queued" && (schedule.category === "all" || article.category === schedule.category)).length;
-  const missingPublicationOrders = schedule.category === "all" && snapshot.articles.some((article) => article.status === "queued" && article.publicationOrder === undefined);
+  const queuedCount = snapshot.articles.filter((article) => article.status === "queued" && article.category !== "essay" && (schedule.category === "all" || article.category === schedule.category)).length;
+  const missingPublicationOrders = hasMissingPublicationOrders(snapshot.articles, schedule.category);
   const changeFrequency = (nextFrequency: PublicationScheduleFrequency) => onScheduleChange({
     ...schedule,
     frequency: nextFrequency,
