@@ -14,6 +14,12 @@ const REQUEST_TIMEOUT_MS = 15_000;
 interface CachedResponse<T> {
   etag: string | null;
   value: T;
+  changed: boolean;
+}
+
+export interface SnapshotLoadResult {
+  snapshot: RepositorySnapshot;
+  changed: boolean;
 }
 
 interface ContentsResponse {
@@ -33,22 +39,32 @@ interface DirectoryEntry {
 }
 
 export class GithubClient {
+  private readonly token: string;
   private treeCache?: CachedResponse<string[]>;
   private statusCache?: CachedResponse<{ document: StatusDocument; sha: string }>;
   private imageStatusCache?: CachedResponse<{ document: ImageStatusDocument; sha: string | null }>;
   private writeQueue: Promise<unknown> = Promise.resolve();
 
-  public constructor(private readonly token: string) {}
+  public constructor(token: string) {
+    this.token = token;
+  }
 
   public async loadSnapshot(): Promise<RepositorySnapshot> {
+    return (await this.checkForUpdates()).snapshot;
+  }
+
+  public async checkForUpdates(): Promise<SnapshotLoadResult> {
     const [paths, status, imageStatus] = await Promise.all([this.getArticlePaths(), this.getStatusFile(), this.getImageStatusFile()]);
     const merged = mergeArticlePaths(paths.value, status.value.document);
     return {
-      articles: merged.articles,
-      status: status.value.document,
-      imageStatus: imageStatus.value.document,
-      missingStatusPaths: merged.missingStatusPaths,
-      orphanStatusPaths: merged.orphanStatusPaths,
+      snapshot: {
+        articles: merged.articles,
+        status: status.value.document,
+        imageStatus: imageStatus.value.document,
+        missingStatusPaths: merged.missingStatusPaths,
+        orphanStatusPaths: merged.orphanStatusPaths,
+      },
+      changed: paths.changed || status.changed || imageStatus.changed,
     };
   }
 
@@ -146,7 +162,7 @@ export class GithubClient {
 
       if (response.status === 200 || response.status === 201) {
         const newSha = response.data.sha;
-        this.statusCache = { etag: null, value: { document: nextDocument, sha: newSha } };
+        this.statusCache = { etag: null, value: { document: nextDocument, sha: newSha }, changed: true };
         return nextDocument;
       }
       if (response.status !== 409) {
@@ -191,7 +207,7 @@ export class GithubClient {
       );
 
       if (response.status === 200 || response.status === 201) {
-        this.imageStatusCache = { etag: null, value: { document: nextDocument, sha: response.data.sha } };
+        this.imageStatusCache = { etag: null, value: { document: nextDocument, sha: response.data.sha }, changed: true };
         return nextDocument;
       }
       if (response.status !== 409) throw new Error(`image-status.json の更新に失敗しました (${response.status})`);
@@ -242,7 +258,7 @@ export class GithubClient {
       {},
       this.treeCache?.etag ?? undefined,
     );
-    if (response.status === 304 && this.treeCache) return this.treeCache;
+    if (response.status === 304 && this.treeCache) return { ...this.treeCache, changed: false };
     if (response.status !== 200 || !response.data.tree) {
       throw new Error("記事一覧を取得できませんでした。");
     }
@@ -253,7 +269,7 @@ export class GithubClient {
       .filter((entry) => entry.type === "blob" && typeof entry.path === "string" && isArticlePath(entry.path))
       .map((entry) => entry.path as string)
       .sort((left, right) => left.localeCompare(right, "ja"));
-    this.treeCache = { etag: response.etag, value: paths };
+    this.treeCache = { etag: response.etag, value: paths, changed: true };
     return this.treeCache;
   }
 
@@ -263,7 +279,7 @@ export class GithubClient {
       {},
       force ? undefined : this.statusCache?.etag ?? undefined,
     );
-    if (response.status === 304 && this.statusCache) return this.statusCache;
+    if (response.status === 304 && this.statusCache) return { ...this.statusCache, changed: false };
     if (response.status !== 200 || !response.data.content || response.data.encoding !== "base64") {
       throw new Error("status.json を取得できませんでした。先に初期化スクリプトを実行してください。");
     }
@@ -273,7 +289,7 @@ export class GithubClient {
     } catch (error) {
       throw new Error(`status.json の検証に失敗しました: ${error instanceof Error ? error.message : "不明なエラー"}`);
     }
-    this.statusCache = { etag: response.etag, value: { document, sha: response.data.sha } };
+    this.statusCache = { etag: response.etag, value: { document, sha: response.data.sha }, changed: true };
     return this.statusCache;
   }
 
@@ -284,9 +300,13 @@ export class GithubClient {
       force ? undefined : this.imageStatusCache?.etag ?? undefined,
       [404],
     );
-    if (response.status === 304 && this.imageStatusCache) return this.imageStatusCache;
+    if (response.status === 304 && this.imageStatusCache) return { ...this.imageStatusCache, changed: false };
     if (response.status === 404) {
-      const empty = { etag: null, value: { document: emptyImageStatusDocument(), sha: null } };
+      const empty = {
+        etag: null,
+        value: { document: emptyImageStatusDocument(), sha: null },
+        changed: this.imageStatusCache?.value.sha !== null,
+      };
       this.imageStatusCache = empty;
       return empty;
     }
@@ -299,7 +319,7 @@ export class GithubClient {
     } catch (error) {
       throw new Error(`image-status.json の検証に失敗しました: ${error instanceof Error ? error.message : "不明なエラー"}`);
     }
-    this.imageStatusCache = { etag: response.etag, value: { document, sha: response.data.sha } };
+    this.imageStatusCache = { etag: response.etag, value: { document, sha: response.data.sha }, changed: true };
     return this.imageStatusCache;
   }
 
