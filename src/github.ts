@@ -191,7 +191,13 @@ export class GithubClient {
   private async updateArticleWithImageWithRetry(articlePath: string, taskId: string, imageMarkdown: string): Promise<string> {
     for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt += 1) {
       const latest = await this.getArticleFile(articlePath);
-      const nextMarkdown = replaceImagePlaceholder(latest.content, taskId, imageMarkdown);
+      let nextMarkdown: string;
+      try {
+        nextMarkdown = replaceImagePlaceholder(latest.content, taskId, imageMarkdown);
+      } catch (error) {
+        if (latest.content.includes(imageMarkdown)) return latest.content;
+        throw error;
+      }
       const response = await this.request<ContentsResponse>(
         `/repos/${OWNER}/${REPOSITORY}/contents/${encodePath(articlePath)}`,
         {
