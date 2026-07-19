@@ -86,8 +86,12 @@ input:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3p
 .image-plan-intro { color: #637068; font-size: .9rem; }
 .image-task { margin-top: 14px; border-top: 1px solid #e5e1d8; padding-top: 14px; }
 .image-task-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.image-task-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .image-task p { margin: 6px 0 10px; overflow-wrap: anywhere; }
 .image-decision { border-radius: 999px; padding: 3px 8px; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.image-registration-stage { border-radius: 999px; padding: 3px 8px; background: #eef3ed; color: #4e6054; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.image-stage-asset-uploaded, .image-stage-article-updated { background: #fff0dc; color: #98551e; }
+.image-stage-completed { background: #e5f0e7; color: #23633e; }
 .image-decision-pending { background: #e9e7e1; color: #70746f; }
 .image-decision-generate { background: #eee6ff; color: #64458d; }
 .image-decision-provide { background: #e5f0e7; color: #23633e; }
@@ -98,6 +102,11 @@ input:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3p
 .image-prompt-button, .image-upload-button { margin-top: 10px; }
 .image-upload-button { cursor: pointer; }
 .image-asset-path { color: #637068; font-size: .8rem; overflow-wrap: anywhere; }
+.image-recovery { margin-top: 12px; border-left: 3px solid #d99342; padding: 8px 0 8px 12px; color: #79521e; }
+.image-recovery p { margin: 0 0 8px; font-size: .86rem; }
+.image-recovery-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.orphan-image-list { margin: 8px 0 0; padding-left: 20px; font-size: .8rem; overflow-wrap: anywhere; }
+.orphan-image-empty { color: #637068; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .publish-card .primary-button { margin-top: 12px; }
 .markdown-preview { min-width: 0; border-top: 1px solid #d8d5cc; padding-top: 28px; color: #263b32; overflow-wrap: anywhere; }

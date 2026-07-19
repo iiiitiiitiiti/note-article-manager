@@ -14,9 +14,12 @@ export interface StatusDocument {
 
 export type ImageDecision = "pending" | "generate" | "provide" | "skip";
 
+export type ImageRegistrationStage = "not-started" | "asset-uploaded" | "article-updated" | "completed";
+
 export interface ImageTaskState {
   decision: ImageDecision;
   assetPath: string | null;
+  registrationStage: ImageRegistrationStage;
   updatedAt: string | null;
 }
 
