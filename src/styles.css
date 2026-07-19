@@ -83,6 +83,11 @@ h2 { font-size: 1.05rem; }
 .schedule-list { display: grid; gap: 6px; margin: 14px 0 0; padding-left: 24px; }
 .schedule-list li { display: flex; flex-wrap: wrap; gap: 8px; color: #263b32; }
 .schedule-list time { min-width: 150px; color: #98551e; font-size: .82rem; font-weight: 700; }
+.notification-settings { margin-top: 16px; border-top: 1px solid #e5e1d8; padding-top: 14px; }
+.notification-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.notification-heading span { border-radius: 999px; padding: 3px 8px; background: #e9e7e1; color: #637068; font-size: .72rem; font-weight: 700; }
+.notification-heading span:empty { display: none; }
+.notification-settings .secondary-button { margin-top: 4px; }
 .notification-note { margin: 12px 0 0; color: #79521e; font-size: .8rem; }
 .health-list { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
 .health-list li { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 8px; border-top: 1px solid #e5e1d8; padding-top: 9px; overflow-wrap: anywhere; }
@@ -92,6 +97,8 @@ h2 { font-size: 1.05rem; }
 .health-list li small { font-size: .78rem; }
 .settings-card { margin-top: 28px; border: 1px solid #dedbd2; background: #fffdf8; box-shadow: 0 16px 44px rgba(23, 63, 53, .08); }
 .settings-card p { color: #637068; }
+.connection-result { color: #23633e; font-size: .82rem; }
+.error-text { color: #8a2e24; font-size: .82rem; }
 code { border-radius: 4px; padding: 2px 4px; background: #eeeae0; font-size: .9em; }
 label { display: block; margin: 16px 0 6px; font-size: .85rem; font-weight: 700; }
 input, textarea { width: 100%; min-width: 0; border: 1px solid #cfcac0; border-radius: 9px; padding: 10px 12px; background: #fff; color: #173f35; }

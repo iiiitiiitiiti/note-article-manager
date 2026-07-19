@@ -108,6 +108,26 @@ export interface PublicationScheduleConfig {
   startAt: string;
   intervalDays: number;
   category: string;
+  notificationTime?: string;
+}
+
+export interface PushSubscriptionData {
+  endpoint: string;
+  expirationTime: number | null;
+  keys: {
+    auth: string;
+    p256dh: string;
+  };
+}
+
+export interface NotificationConfig {
+  schemaVersion: 1;
+  timezone: "Asia/Tokyo";
+  vapidPublicKey: string;
+  notificationTime: string;
+  schedule: PublicationScheduleConfig;
+  subscriptions: PushSubscriptionData[];
+  sentKeys: string[];
 }
 
 export interface ScheduledArticle {

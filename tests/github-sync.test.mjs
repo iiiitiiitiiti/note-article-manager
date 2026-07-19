@@ -77,6 +77,32 @@ test("saved PAT connection test verifies read access and repository write permis
   }
 });
 
+test("publication notification config is saved with the schedule and push subscription", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (calls.length === 1) return jsonResponse(404, { message: "Not Found" });
+    return jsonResponse(201, { content: {}, sha: "notification-sha" });
+  };
+
+  try {
+    await new GithubClient("test-token").saveNotificationConfig(
+      { startAt: "2026-07-20T09:00", intervalDays: 7, category: "design", notificationTime: "09:00" },
+      { endpoint: "https://example.test/push", expirationTime: null, keys: { auth: "auth", p256dh: "p256dh" } },
+      "public-key",
+    );
+    const saved = JSON.parse(calls[1].init.body);
+    const document = JSON.parse(Buffer.from(saved.content, "base64").toString("utf8"));
+    assert.match(calls[1].url, /notification-config\.json/);
+    assert.equal(document.vapidPublicKey, "public-key");
+    assert.equal(document.schedule.startAt, "2026-07-20T09:00");
+    assert.equal(document.subscriptions[0].endpoint, "https://example.test/push");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("GitHub API status failures retain actionable classifications without exposing the token", async () => {
   const originalFetch = globalThis.fetch;
   const cases = [

@@ -1,6 +1,6 @@
 import type { ArticlePath, PublicationScheduleConfig, ScheduledArticle } from "./types";
 
-export const DEFAULT_SCHEDULE: PublicationScheduleConfig = { startAt: "", intervalDays: 7, category: "all" };
+export const DEFAULT_SCHEDULE: PublicationScheduleConfig = { startAt: "", intervalDays: 7, category: "all", notificationTime: "09:00" };
 
 export function buildPublicationSchedule(articles: ArticlePath[], config: PublicationScheduleConfig): ScheduledArticle[] {
   if (!config.startAt) return [];
