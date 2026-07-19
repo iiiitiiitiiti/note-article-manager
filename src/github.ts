@@ -1,5 +1,6 @@
 import { mergeArticlePaths, validateStatusDocument, withArticleStatus } from "./status";
 import { emptyImageStatusDocument, IMAGE_STATUS_PATH, MAX_IMAGE_BYTES, replaceImagePlaceholder, validateImageStatusDocument, withImageTaskState } from "./image-plan";
+import { createGithubApiError, createGithubNetworkError } from "./github-errors";
 import type { ArticleStatusEntry, ImageStatusDocument, ImageTaskState, RepositorySnapshot, StatusDocument } from "./types";
 
 const API_ROOT = "https://api.github.com";
@@ -8,6 +9,7 @@ const REPOSITORY = "note-articles";
 const BRANCH = "main";
 const STATUS_PATH = "status.json";
 const MAX_WRITE_ATTEMPTS = 3;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 interface CachedResponse<T> {
   etag: string | null;
@@ -50,18 +52,22 @@ export class GithubClient {
     return file.content;
   }
 
-  public async getArticleFile(path: string): Promise<{ content: string; sha: string }> {
+  public async getArticleFile(path: string, operation = "記事本文"): Promise<{ content: string; sha: string }> {
     const response = await this.request<ContentsResponse>(
       `/repos/${OWNER}/${REPOSITORY}/contents/${encodePath(path)}?ref=${BRANCH}`,
+      {},
+      undefined,
+      [],
+      operation,
     );
     if (response.status !== 200 || !response.data.content || response.data.encoding !== "base64") {
-      throw new Error(`記事本文を取得できませんでした: ${path}`);
+      throw new Error(`${operation}を取得できませんでした: ${path}`);
     }
     return { content: decodeBase64Utf8(response.data.content), sha: response.data.sha };
   }
 
   public async getImageDataUrl(path: string): Promise<string> {
-    const file = await this.getArticleFile(path);
+    const file = await this.getArticleFile(path, `画像「${path}」`);
     const normalized = file.content.replace(/\s/g, "");
     if (normalized.length * 0.75 > MAX_IMAGE_BYTES) throw new Error(`画像が大きすぎるためプレビューできません: ${path}`);
     return `data:${mimeTypeForPath(path)};base64,${normalized}`;
@@ -74,7 +80,7 @@ export class GithubClient {
     const endpoint = `/repos/${OWNER}/${REPOSITORY}/contents/${encodePath(path)}`;
     const content = encodeBase64Bytes(bytes);
     for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt += 1) {
-      const existing = await this.request<ContentsResponse>(`${endpoint}?ref=${BRANCH}`, {}, undefined, [404]);
+      const existing = await this.request<ContentsResponse>(`${endpoint}?ref=${BRANCH}`, {}, undefined, [404], "画像");
       const response = await this.request<ContentsResponse>(endpoint, {
         method: "PUT",
         body: JSON.stringify({
@@ -83,11 +89,11 @@ export class GithubClient {
           ...(existing.status === 200 ? { sha: existing.data.sha } : {}),
           branch: BRANCH,
         }),
-      });
+      }, undefined, [], "画像の登録");
       if (response.status === 200 || response.status === 201) return;
       if (response.status !== 409 || attempt === MAX_WRITE_ATTEMPTS) break;
     }
-    throw new Error("画像が別端末で更新されたため、アップロードを中止しました。再試行してください。");
+    throw createGithubApiError(409, "競合", undefined, "画像の登録");
   }
 
   public updateArticleStatus(
@@ -131,7 +137,7 @@ export class GithubClient {
       if (attempt === MAX_WRITE_ATTEMPTS) break;
     }
 
-    throw new Error("status.json が別端末で更新され続けているため、保存を中止しました。再読み込みして再試行してください。");
+    throw createGithubApiError(409, "競合", undefined, "公開状況の保存");
   }
 
   public updateImageTaskState(
@@ -173,7 +179,7 @@ export class GithubClient {
       this.imageStatusCache = undefined;
       if (attempt === MAX_WRITE_ATTEMPTS) break;
     }
-    throw new Error("image-status.json が別端末で更新され続けているため、保存を中止しました。再読み込みして再試行してください。");
+    throw createGithubApiError(409, "競合", undefined, "画像状態の保存");
   }
 
   public updateArticleWithImage(articlePath: string, taskId: string, imageMarkdown: string): Promise<string> {
@@ -202,7 +208,7 @@ export class GithubClient {
       if (response.status !== 409) throw new Error(`記事本文の画像差し込みに失敗しました (${response.status})`);
       if (attempt === MAX_WRITE_ATTEMPTS) break;
     }
-    throw new Error("記事本文が別端末で更新され続けているため、画像の差し込みを中止しました。再読み込みして再試行してください。");
+    throw createGithubApiError(409, "競合", undefined, "記事本文の保存");
   }
 
   private async getArticlePaths(): Promise<CachedResponse<string[]>> {
@@ -277,6 +283,7 @@ export class GithubClient {
     init: RequestInit = {},
     etag?: string,
     acceptedErrorStatuses: number[] = [],
+    operation = operationForEndpoint(endpoint, init),
   ): Promise<{ status: number; data: T; etag: string | null }> {
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/vnd.github+json");
@@ -285,23 +292,47 @@ export class GithubClient {
     if (init.body) headers.set("Content-Type", "application/json");
     if (etag) headers.set("If-None-Match", etag);
 
-    const response = await fetch(`${API_ROOT}${endpoint}`, { ...init, headers });
+    const controller = new AbortController();
+    const timeoutId = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let response: Response;
+    let raw: string;
+    try {
+      response = await fetch(`${API_ROOT}${endpoint}`, { ...init, headers, signal: controller.signal });
+      raw = await response.text();
+    } catch (requestError) {
+      throw createGithubNetworkError(
+        operation,
+        requestError,
+        typeof navigator !== "undefined" && navigator.onLine === false,
+      );
+    } finally {
+      globalThis.clearTimeout(timeoutId);
+    }
     const responseEtag = response.headers.get("ETag");
     if (response.status === 304) return { status: 304, data: undefined as T, etag: responseEtag ?? etag ?? null };
 
-    const raw = await response.text();
     let data: T;
     try {
       data = JSON.parse(raw) as T;
     } catch {
-      throw new Error(`GitHub API が JSON を返しませんでした (${response.status})`);
+      throw createGithubApiError(response.status, "GitHub API が JSON を返しませんでした。", response.headers, operation);
     }
     if (!response.ok && response.status !== 409 && !acceptedErrorStatuses.includes(response.status)) {
       const message = typeof data === "object" && data && "message" in data ? String(data.message) : "API エラー";
-      throw new Error(`${message} (${response.status})`);
+      throw createGithubApiError(response.status, message, response.headers, operation);
     }
     return { status: response.status, data, etag: responseEtag };
   }
+}
+
+function operationForEndpoint(endpoint: string, init: RequestInit): string {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (endpoint.includes("/git/trees/")) return "記事一覧";
+  if (endpoint.includes("image-status.json")) return method === "PUT" ? "画像状態の保存" : "画像状態";
+  if (endpoint.includes("status.json")) return method === "PUT" ? "公開状況の保存" : "公開状況";
+  if (endpoint.includes("/contents/") && endpoint.includes("/images/")) return method === "PUT" ? "画像の登録" : "画像";
+  if (endpoint.includes("/contents/")) return method === "PUT" ? "記事本文の保存" : "記事本文";
+  return "GitHub API";
 }
 
 export function isArticlePath(path: string): boolean {
