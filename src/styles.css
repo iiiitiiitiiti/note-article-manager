@@ -77,9 +77,15 @@ h2 { font-size: 1.05rem; }
 .dashboard-metric-review, .dashboard-metric-image { background: #fff0dc; }
 .dashboard-metric-published { background: #e5f0e7; }
 .schedule-card, .health-card { margin-top: 14px; border-top: 1px solid #e5e1d8; padding-top: 14px; }
-.schedule-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.schedule-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 10px; min-width: 0; }
 .schedule-fields label { margin-top: 10px; }
-.schedule-fields input, .schedule-fields select { width: 100%; min-width: 0; }
+.schedule-fields input, .schedule-fields select { display: block; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+.schedule-fields input[type="datetime-local"], .schedule-fields input[type="time"] { min-inline-size: 0; padding-inline: 10px; font-size: 16px; -webkit-appearance: none; appearance: none; }
+.schedule-weekdays { grid-column: 1 / -1; min-width: 0; margin: 12px 0 2px; border: 1px solid #d8d5cc; border-radius: 10px; padding: 10px; }
+.schedule-weekdays legend { padding: 0 4px; color: #637068; font-size: .78rem; font-weight: 700; }
+.schedule-weekday-options { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.schedule-weekday-label { display: inline-flex; align-items: center; gap: 5px; margin: 0; border-radius: 999px; padding: 5px 9px; background: #f0eee8; color: #4e6054; font-size: .8rem; font-weight: 400; }
+.schedule-weekday-label input { width: auto; min-width: auto; }
 .schedule-list { display: grid; gap: 6px; margin: 14px 0 0; padding-left: 24px; }
 .schedule-list li { display: flex; flex-wrap: wrap; gap: 8px; color: #263b32; }
 .schedule-list time { min-width: 150px; color: #98551e; font-size: .82rem; font-weight: 700; }

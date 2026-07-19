@@ -36,3 +36,29 @@ test("publication schedule uses queued articles and the configured interval", ()
   assert.deepEqual(schedule.map((item) => item.path), ["design/01_one.md", "design/02_two.md"]);
   assert.equal(schedule[1].scheduledAt, "2026-07-27T09:00:00.000Z");
 });
+
+test("all-category publication schedules use the explicit mixed publication order", () => {
+  const articles = [
+    { path: "book-review/01_book.md", category: "book-review", status: "queued", queueOrder: 1, publicationOrder: 2, publishedUrl: null, publishedAt: null },
+    { path: "design/01_design.md", category: "design", status: "queued", queueOrder: 1, publicationOrder: 1, publishedUrl: null, publishedAt: null },
+    { path: "essay/essay.md", category: "essay", status: "queued", publishedUrl: null, publishedAt: null },
+  ];
+  const schedule = buildPublicationSchedule(articles, { startAt: "2026-07-20T09:00:00Z", intervalDays: 7, category: "all", frequency: "weekly" });
+
+  assert.deepEqual(schedule.map((item) => item.path), ["design/01_design.md", "book-review/01_book.md", "essay/essay.md"]);
+});
+
+test("weekday schedules assign one article to each selected weekday", () => {
+  const articles = [
+    { path: "design/01_one.md", category: "design", status: "queued", queueOrder: 1, publishedUrl: null, publishedAt: null },
+    { path: "design/02_two.md", category: "design", status: "queued", queueOrder: 2, publishedUrl: null, publishedAt: null },
+    { path: "design/03_three.md", category: "design", status: "queued", queueOrder: 3, publishedUrl: null, publishedAt: null },
+  ];
+  const schedule = buildPublicationSchedule(articles, { startAt: "2026-07-20T09:00:00Z", intervalDays: 7, category: "design", frequency: "weekdays", weekdays: [1, 3] });
+
+  assert.deepEqual(schedule.map((item) => item.scheduledAt), [
+    "2026-07-20T09:00:00.000Z",
+    "2026-07-22T09:00:00.000Z",
+    "2026-07-27T09:00:00.000Z",
+  ]);
+});
