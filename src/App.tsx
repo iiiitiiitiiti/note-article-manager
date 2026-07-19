@@ -7,7 +7,7 @@ import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImage
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadPublicationSchedule, loadToken, saveArticleReturnPath, savePublicationSchedule, saveToken } from "./storage";
 
-const NOTE_COMPOSE_URL = "https://note.com/intent/post";
+const NOTE_APP_URL = "https://note.com/";
 import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, PublicationScheduleConfig, PublicationScheduleFrequency, PushSubscriptionData, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -796,7 +796,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
 
   const openNote = () => {
     onPrepareNoteNavigation();
-    window.location.assign(NOTE_COMPOSE_URL);
+    window.location.assign(NOTE_APP_URL);
   };
 
   const copy = (label: string, text: string, openNoteAfterCopy = false) => {
@@ -1077,7 +1077,7 @@ function ManualCopy({ label, text, onClose, onOpenNote }: { label: string; text:
       <div className="manual-copy-heading">
         <strong>{label}を手動コピー</strong>
         <div className="manual-copy-actions">
-          {onOpenNote && <button className="secondary-button" type="button" onClick={onOpenNote}>note執筆画面を開く</button>}
+          {onOpenNote && <button className="secondary-button" type="button" onClick={onOpenNote}>noteを開く</button>}
           <button type="button" onClick={onClose}>閉じる</button>
         </div>
       </div>
