@@ -56,12 +56,17 @@ test("buildStatusDocument initializes every article and preserves published stat
     },
   });
 
-  assert.equal(buildStatusDocument(repoRoot, {
+  assert.deepEqual(buildStatusDocument(repoRoot, {
     schemaVersion: 1,
     articles: {
-      "essay/日記.md": { status: "published", publishedUrl: "https://note.com/example", publishedAt: "2026-07-18T00:00:00.000Z" },
+      "essay/日記.md": { status: "published", publicationOrder: 4, publishedUrl: "https://note.com/example", publishedAt: "2026-07-18T00:00:00.000Z" },
     },
-  }).articles["essay/日記.md"].status, "published");
+  }).articles["essay/日記.md"], {
+    status: "published",
+    publicationOrder: 4,
+    publishedUrl: "https://note.com/example",
+    publishedAt: "2026-07-18T00:00:00.000Z",
+  });
 });
 
 test("image placeholders become stable tasks and preserve decisions", () => {
