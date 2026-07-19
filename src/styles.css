@@ -66,6 +66,30 @@ h2 { font-size: 1.05rem; }
 .sync-status.sync-pending { border-color: #e6c995; background: #fff8ea; color: #79521e; }
 .sync-status.sync-error { border-color: #d99387; background: #fff0ed; color: #8a2e24; }
 .sync-status .secondary-button { padding: 4px 8px; font-size: .76rem; }
+.dashboard-panel { margin: 0 0 18px; border: 1px solid #dedbd2; border-radius: 14px; padding: 16px; background: #fffdf8; }
+.dashboard-heading-line { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dashboard-heading-line h2 { margin-bottom: 0; }
+.dashboard-total { color: #637068; font-size: .82rem; }
+.dashboard-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.dashboard-metric { display: flex; min-width: 0; flex-direction: column; gap: 2px; border-radius: 10px; padding: 10px; background: #f0eee8; color: #637068; font-size: .76rem; }
+.dashboard-metric strong { color: #173f35; font-size: 1.45rem; line-height: 1.1; }
+.dashboard-metric-queued { background: #eef3ed; }
+.dashboard-metric-review, .dashboard-metric-image { background: #fff0dc; }
+.dashboard-metric-published { background: #e5f0e7; }
+.schedule-card, .health-card { margin-top: 14px; border-top: 1px solid #e5e1d8; padding-top: 14px; }
+.schedule-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.schedule-fields label { margin-top: 10px; }
+.schedule-fields input, .schedule-fields select { width: 100%; min-width: 0; }
+.schedule-list { display: grid; gap: 6px; margin: 14px 0 0; padding-left: 24px; }
+.schedule-list li { display: flex; flex-wrap: wrap; gap: 8px; color: #263b32; }
+.schedule-list time { min-width: 150px; color: #98551e; font-size: .82rem; font-weight: 700; }
+.notification-note { margin: 12px 0 0; color: #79521e; font-size: .8rem; }
+.health-list { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.health-list li { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 8px; border-top: 1px solid #e5e1d8; padding-top: 9px; overflow-wrap: anywhere; }
+.health-list li strong { color: #98551e; font-size: .78rem; }
+.health-list li code { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.health-list li span, .health-list li small { grid-column: 1 / -1; color: #637068; }
+.health-list li small { font-size: .78rem; }
 .settings-card { margin-top: 28px; border: 1px solid #dedbd2; background: #fffdf8; box-shadow: 0 16px 44px rgba(23, 63, 53, .08); }
 .settings-card p { color: #637068; }
 code { border-radius: 4px; padding: 2px 4px; background: #eeeae0; font-size: .9em; }
@@ -92,6 +116,12 @@ input:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3p
 .transfer-blocked { color: #79521e; }
 .warning-list { margin: 14px 0 0; border-left: 3px solid #d99342; padding-left: 18px; color: #79521e; font-size: .88rem; }
 .warning-list li + li { margin-top: 10px; }
+.list-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .4fr) max-content; align-items: end; gap: 8px 10px; margin: 16px 0 0; }
+.list-controls label { grid-row: 1; margin: 0; color: #637068; font-size: .78rem; }
+.list-controls label:nth-of-type(2) { grid-column: 2; }
+.list-controls input { grid-column: 1; grid-row: 2; }
+.list-controls select { grid-column: 2; grid-row: 2; min-height: 42px; border: 1px solid #cfcac0; border-radius: 9px; padding: 8px 10px; background: #fff; color: #173f35; }
+.list-result-count { grid-column: 3; grid-row: 2; padding-bottom: 10px; color: #637068; font-size: .8rem; white-space: nowrap; }
 .manual-copy { margin-top: 16px; border: 1px solid #d6c18f; background: #fff8ea; }
 .manual-copy textarea { min-height: 180px; margin-top: 10px; font-size: .86rem; line-height: 1.55; }
 .manual-copy p { margin: 8px 0 0; color: #79521e; font-size: .8rem; }
@@ -157,6 +187,13 @@ input:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3p
 }
 @media (max-width: 480px) {
   .app-header { flex-wrap: wrap; }
+  .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .schedule-fields { grid-template-columns: 1fr; }
+  .list-controls { grid-template-columns: minmax(0, 1fr) max-content; }
+  .list-controls label:nth-of-type(2) { grid-column: 2; }
+  .list-controls input { grid-column: 1; }
+  .list-controls select { grid-column: 2; }
+  .list-result-count { grid-column: 1 / -1; grid-row: 3; padding-bottom: 0; }
   .article-row-side { max-width: 100%; align-items: flex-start; }
   .image-progress { align-items: flex-start; text-align: left; }
 }

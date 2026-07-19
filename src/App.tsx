@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { GithubClient, type ConnectionTestResult } from "./github";
 import { GithubApiError } from "./github-errors";
+import { buildPublicationSchedule, DEFAULT_SCHEDULE } from "./schedule";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
-import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadToken, saveArticleReturnPath, saveToken } from "./storage";
+import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadPublicationSchedule, loadToken, saveArticleReturnPath, savePublicationSchedule, saveToken } from "./storage";
 
 const NOTE_COMPOSE_URL = "https://note.com/intent/post";
-import type { ArticleContent, ArticlePath, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, RepositorySnapshot } from "./types";
+import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, PublicationScheduleConfig, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   design: "design",
@@ -56,7 +57,10 @@ export default function App() {
   const [returnPath, setReturnPath] = useState(loadArticleReturnPath);
   const [snapshot, setSnapshot] = useState<RepositorySnapshot | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("design");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | ArticleStatus>("all");
   const [showPendingImagesOnly, setShowPendingImagesOnly] = useState(false);
+  const [schedule, setSchedule] = useState<PublicationScheduleConfig>(() => loadPublicationSchedule(DEFAULT_SCHEDULE));
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [article, setArticle] = useState<ArticleContent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -215,6 +219,11 @@ export default function App() {
     setError(null);
   };
 
+  const updateSchedule = (next: PublicationScheduleConfig) => {
+    setSchedule(next);
+    savePublicationSchedule(next);
+  };
+
   if (showSettings || !token) {
     return <SettingsScreen hasToken={Boolean(token)} onSave={handleTokenSave} onTestConnection={testConnection} onResume={() => setShowSettings(false)} onClear={handleTokenClear} />;
   }
@@ -264,9 +273,13 @@ export default function App() {
   const categories = [...new Set(snapshot?.articles.map((item) => item.category) ?? [])];
   const categoryArticles = (snapshot?.articles ?? []).filter((item) => item.category === selectedCategory);
   const pendingImageArticleCount = categoryArticles.filter((item) => summarizeImageTasks(snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }, item.path).pending > 0).length;
-  const visibleArticles = showPendingImagesOnly
-    ? categoryArticles.filter((item) => summarizeImageTasks(snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }, item.path).pending > 0)
-    : categoryArticles;
+  const normalizedQuery = searchQuery.trim().toLocaleLowerCase("ja");
+  const visibleArticles = categoryArticles.filter((item) => {
+    const matchesStatus = statusFilter === "all" || item.status === statusFilter;
+    const matchesQuery = !normalizedQuery || `${item.path} ${articleDisplayName(item)}`.toLocaleLowerCase("ja").includes(normalizedQuery);
+    const matchesImage = !showPendingImagesOnly || summarizeImageTasks(snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }, item.path).pending > 0;
+    return matchesStatus && matchesQuery && matchesImage;
+  });
 
   return (
     <main className="app-shell">
@@ -285,6 +298,8 @@ export default function App() {
       {loading && <p className="loading">GitHub から記事一覧を読み込んでいます…</p>}
       <SyncStatus state={syncState} onRetry={reload} />
       {snapshot && <RepositoryWarnings snapshot={snapshot} />}
+      {snapshot && <DashboardPanel snapshot={snapshot} schedule={schedule} onScheduleChange={updateSchedule} />}
+      <HealthCheckPanel client={client} />
       <ImageInventoryPanel client={client} />
 
       {snapshot && (
@@ -311,8 +326,23 @@ export default function App() {
             </button>
           </nav>
 
+          <section className="list-controls" aria-label="記事の検索と絞り込み">
+            <label htmlFor="article-search">記事を検索</label>
+            <input id="article-search" type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="ファイル名・パスで検索" />
+            <label htmlFor="status-filter">公開状況</label>
+            <select id="status-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | ArticleStatus)}>
+              <option value="all">すべて</option>
+              <option value="queued">公開待ち</option>
+              <option value="review">レビュー待ち</option>
+              <option value="published">公開済み</option>
+              <option value="draft">執筆中</option>
+              <option value="unset">未設定</option>
+            </select>
+            <span className="list-result-count">{visibleArticles.length}件表示</span>
+          </section>
+
           <section className="article-list" aria-label={`${CATEGORY_LABELS[selectedCategory] ?? selectedCategory}の記事`}>
-            {visibleArticles.length === 0 && <p className="empty-state">{showPendingImagesOnly ? "画像が未決定の記事はありません。" : "この種別の記事はありません。"}</p>}
+            {visibleArticles.length === 0 && <p className="empty-state">{normalizedQuery || statusFilter !== "all" || showPendingImagesOnly ? "条件に一致する記事はありません。" : "この種別の記事はありません。"}</p>}
             {visibleArticles.map((item) => <ArticleListItem key={item.path} article={item} imageProgress={summarizeImageTasks(snapshot.imageStatus, item.path)} onOpen={openArticle} />)}
           </section>
         </>
@@ -446,12 +476,102 @@ function imageInventoryIssueLabel(kind: ImageInventory["issues"][number]["kind"]
   return "状態のみ";
 }
 
+function DashboardPanel({ snapshot, schedule, onScheduleChange }: { snapshot: RepositorySnapshot; schedule: PublicationScheduleConfig; onScheduleChange: (next: PublicationScheduleConfig) => void }) {
+  const summaries = snapshot.articles.reduce((result, article) => {
+    result[article.status] += 1;
+    return result;
+  }, { queued: 0, review: 0, published: 0, draft: 0, unset: 0 } as Record<ArticleStatus, number>);
+  const pendingImages = snapshot.articles.filter((article) => summarizeImageTasks(snapshot.imageStatus, article.path).pending > 0).length;
+  const scheduled = buildPublicationSchedule(snapshot.articles, schedule);
+  const categories = [...new Set(snapshot.articles.map((article) => article.category))];
+  return (
+    <section className="dashboard-panel" aria-labelledby="dashboard-heading">
+      <div className="dashboard-heading-line">
+        <div><p className="eyebrow">PUBLICATION DASHBOARD</p><h2 id="dashboard-heading">公開の進み具合</h2></div>
+        <span className="dashboard-total">全 {snapshot.articles.length} 件</span>
+      </div>
+      <div className="dashboard-metrics">
+        <DashboardMetric label="公開待ち" value={summaries.queued} tone="queued" />
+        <DashboardMetric label="レビュー待ち" value={summaries.review} tone="review" />
+        <DashboardMetric label="公開済み" value={summaries.published} tone="published" />
+        <DashboardMetric label="画像未決定" value={pendingImages} tone="image" />
+      </div>
+      <Accordion className="schedule-card" label="公開スケジュールを設定">
+        <p className="image-plan-intro">公開待ちの記事を、ファイル名の接頭辞順で予定日に並べます。設定はこの端末に保存されます。</p>
+        <div className="schedule-fields">
+          <label htmlFor="schedule-start">開始日時</label>
+          <input id="schedule-start" type="datetime-local" value={schedule.startAt} onChange={(event) => onScheduleChange({ ...schedule, startAt: event.target.value })} />
+          <label htmlFor="schedule-interval">公開間隔</label>
+          <select id="schedule-interval" value={schedule.intervalDays} onChange={(event) => onScheduleChange({ ...schedule, intervalDays: Number(event.target.value) })}>
+            <option value="1">毎日</option>
+            <option value="7">毎週</option>
+            <option value="14">2週間ごと</option>
+          </select>
+          <label htmlFor="schedule-category">対象カテゴリ</label>
+          <select id="schedule-category" value={schedule.category} onChange={(event) => onScheduleChange({ ...schedule, category: event.target.value })}>
+            <option value="all">全カテゴリ</option>
+            {categories.map((category) => <option key={category} value={category}>{CATEGORY_LABELS[category] ?? category}</option>)}
+          </select>
+        </div>
+        {scheduled.length === 0 && <p className="inline-message">開始日時を設定すると、公開待ち記事の予定が表示されます。</p>}
+        {scheduled.length > 0 && <ol className="schedule-list">{scheduled.slice(0, 8).map((item) => <li key={item.path}><time dateTime={item.scheduledAt}>{formatScheduleTime(item.scheduledAt)}</time><span>{articleDisplayName({ path: item.path, category: item.category, status: "queued", queueOrder: item.queueOrder, publishedUrl: null, publishedAt: null })}</span></li>)}</ol>}
+        {scheduled.length > 8 && <p className="inline-message">ほか {scheduled.length - 8} 件</p>}
+        <p className="notification-note">iPhoneのバックグラウンド通知は、別途Web Push送信サーバーの設定が必要です。現在はこの画面で公開予定を確認できます。</p>
+      </Accordion>
+    </section>
+  );
+}
+
+function DashboardMetric({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return <div className={`dashboard-metric dashboard-metric-${tone}`}><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function HealthCheckPanel({ client }: { client: GithubClient }) {
+  const [report, setReport] = useState<ArticleHealthReport | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const checkHealth = async () => {
+    setChecking(true);
+    setError(null);
+    try {
+      setReport(await client.getArticleHealthReport());
+    } catch (checkError) {
+      setError(toError(checkError, "記事の健全性を確認できませんでした。"));
+    } finally {
+      setChecking(false);
+    }
+  };
+  return (
+    <Accordion className="health-card" label="記事の健全性チェック">
+      <p className="image-plan-intro">全記事をGitHubから読み込み、note非対応要素、壊れた画像参照、未決定の画像、途中登録を確認します。</p>
+      <button className="secondary-button" type="button" disabled={checking} onClick={() => void checkHealth()}>{checking ? "確認中…" : "全記事を確認"}</button>
+      {error && <ErrorNotice error={error} onRetry={() => void checkHealth()} />}
+      {report && <>
+        <p className="inline-message">記事 {report.scannedArticles}件を確認しました（{formatScheduleTime(report.checkedAt)}）。問題 {report.issues.length}件。</p>
+        {report.issues.length === 0 && <p className="orphan-image-empty">問題は見つかりませんでした。</p>}
+        {report.issues.length > 0 && <ul className="health-list">{report.issues.map((issue) => <li key={`${issue.kind}-${issue.path}`}><strong>{healthIssueLabel(issue.kind)}</strong><code>{issue.path}</code><span>{issue.message}</span><small>{issue.details.join("、")}</small></li>)}</ul>}
+      </>}
+    </Accordion>
+  );
+}
+
+function healthIssueLabel(kind: ArticleHealthReport["issues"][number]["kind"]): string {
+  if (kind === "note-unsupported") return "note非対応";
+  if (kind === "missing-image") return "画像参照切れ";
+  if (kind === "image-pending") return "画像未決定";
+  if (kind === "image-registration") return "画像登録途中";
+  return "画像プレースホルダー";
+}
+
+function formatScheduleTime(value: string): string {
+  return new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
 function ArticleListItem({ article, imageProgress, onOpen }: { article: ArticlePath; imageProgress: ImageProgressSummary; onOpen: (path: string) => void }) {
-  const filename = article.path.split("/").at(-1)?.replace(/\.md$/, "") ?? article.path;
   return (
     <button className="article-row" type="button" onClick={() => void onOpen(article.path)}>
       <span className="article-row-main">
-        <span className="article-row-title">{article.queueOrder ? `${String(article.queueOrder).padStart(2, "0")} ` : ""}{filename.replace(/^\d+[_-]?/, "").replace(/[_-]+/g, " ")}</span>
+        <span className="article-row-title">{articleDisplayName(article)}</span>
         <span className="article-row-path">{article.path}</span>
       </span>
       <span className="article-row-side">
@@ -460,6 +580,11 @@ function ArticleListItem({ article, imageProgress, onOpen }: { article: ArticleP
       </span>
     </button>
   );
+}
+
+function articleDisplayName(article: ArticlePath): string {
+  const filename = article.path.split("/").at(-1)?.replace(/\.md$/, "") ?? article.path;
+  return `${article.queueOrder ? `${String(article.queueOrder).padStart(2, "0")} ` : ""}${filename.replace(/^\d+[_-]?/, "").replace(/[_-]+/g, " ")}`;
 }
 
 function ImageProgressBadge({ summary }: { summary: ImageProgressSummary }) {

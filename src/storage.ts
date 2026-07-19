@@ -1,5 +1,6 @@
 const TOKEN_KEY = "note-article-manager:github-pat";
 const ARTICLE_RETURN_PATH_KEY = "note-article-manager:article-return-path";
+const PUBLICATION_SCHEDULE_KEY = "note-article-manager:publication-schedule";
 
 export function loadToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? "";
@@ -35,4 +36,19 @@ export function clearArticleReturnPath(): void {
   } catch {
     // sessionStorage is optional.
   }
+}
+
+export function loadPublicationSchedule<T extends object>(fallback: T): T {
+  try {
+    const value = localStorage.getItem(PUBLICATION_SCHEDULE_KEY);
+    if (!value) return fallback;
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? { ...fallback, ...parsed } as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function savePublicationSchedule(value: object): void {
+  localStorage.setItem(PUBLICATION_SCHEDULE_KEY, JSON.stringify(value));
 }
