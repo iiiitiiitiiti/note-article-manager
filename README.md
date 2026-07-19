@@ -18,6 +18,7 @@ npm run dev
 - 記事一覧で画像準備の総数・未決定数・判断内訳を確認し、「画像未決定のみ」で絞り込める
 - 記事をファイル名・パスと公開状況で検索・複合フィルターできる
 - 公開待ち・レビュー待ち・公開済み・画像未決定の件数をダッシュボードで確認し、公開順から予定日を算出できる
+- 公開予定日の朝にiPhoneへ通知するWeb Push購読を登録できる（初回だけGitHub SecretsとPagesの公開変数設定が必要）
 - 全記事を対象に、note非対応要素・壊れた画像参照・未決定画像・画像登録途中を検査できる
 - 記事を開いたときだけ Markdown 本文を取得
 - `【画像…】` のプレースホルダーごとに、AI生成／自分で用意／不要の判断を管理
@@ -69,7 +70,16 @@ GitHubの Settings → Developer settings → Personal access tokens → Fine-gr
 
 ダッシュボードでは、公開待ち記事をファイル名の接頭辞順に並べ、開始日時と公開間隔からこの端末向けの予定を表示します。予定設定はlocalStorageに保存され、GitHubのstatus.jsonは変更しません。レビュー待ちの記事は、レビュー通過後に公開待ちへ変わった時点で予定へ入ります。
 
-iPhoneのロック画面へ予定をバックグラウンド通知するには、Home Screen PWAのWeb Push購読情報を送信サーバーへ登録し、送信サーバーから通知を送る構成が必要です。GitHub Pagesだけで時刻になった通知を送ることはできないため、現行版は予定表示までを実装しています。通知を追加する場合は、privateな記事リポジトリのGitHub ActionsとVAPID鍵を使う送信構成を別途設定します。
+通知時刻は日本時間の09:00を初期値とし、15分単位で変更できます。通知を有効にすると、PWAのService WorkerがPush購読を作成し、`notification-config.json`としてprivate記事リポジトリへ保存します。private記事リポジトリのGitHub Actionsは15分ごとに当日の公開予定を確認し、対象記事ごとに一度だけ「〇〇の公開予定日です」と通知します。公開済みになった記事は通知対象から外れます。
+
+初回だけ、次の設定が必要です。
+
+1. `npx --yes web-push@3.6.7 generate-vapid-keys`でVAPID鍵を1組だけ生成する。秘密鍵は再生成せず、GitHub以外へ公開しない。
+2. publicリポジトリ `iiiitiiitiiti/note-article-manager` の Settings → Secrets and variables → Actions → Variables に、公開鍵を `VITE_VAPID_PUBLIC_KEY` として登録する。
+3. private記事リポジトリ `iiiitiiitiiti/note-articles` の Actions Secrets に、秘密鍵を `VAPID_PRIVATE_KEY`、通知の連絡先を `VAPID_SUBJECT`（例: `mailto:iiiitiiitiiti@users.noreply.github.com`）として登録する。
+4. iPhoneでPagesをホーム画面に追加し、PWAから公開スケジュールを設定して「公開予定通知を有効にする」を押す。表示された通知許可を許可する。
+
+GitHub Pagesだけでは時刻になった通知を送れないため、送信処理はprivate記事リポジトリのActionsで実行します。VAPID公開鍵は購読に使う公開情報ですが、秘密鍵とPATは公開ファイルへ置きません。GitHub Actionsの実行遅延に備え、設定時刻から1時間以内の実行を同じ通知枠として扱い、再実行による重複送信を抑止します。
 
 ## 検証
 

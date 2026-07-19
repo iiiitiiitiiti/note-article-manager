@@ -2,13 +2,14 @@ import { mergeArticlePaths, validateStatusDocument, withArticleStatus } from "./
 import { emptyImageStatusDocument, extractLocalImagePaths, filterArticleImageAssets, IMAGE_STATUS_PATH, MAX_IMAGE_BYTES, replaceImagePlaceholder, validateImageStatusDocument, withImageTaskState } from "./image-plan";
 import { inspectArticleHealth } from "./health";
 import { createGithubApiError, createGithubNetworkError } from "./github-errors";
-import type { ArticleHealthReport, ArticleStatusEntry, ImageInventory, ImageInventoryIssue, ImageStatusDocument, ImageTaskState, RepositorySnapshot, StatusDocument } from "./types";
+import type { ArticleHealthReport, ArticleStatusEntry, ImageInventory, ImageInventoryIssue, ImageStatusDocument, ImageTaskState, NotificationConfig, PublicationScheduleConfig, PushSubscriptionData, RepositorySnapshot, StatusDocument } from "./types";
 
 const API_ROOT = "https://api.github.com";
 const OWNER = "iiiitiiitiiti";
 const REPOSITORY = "note-articles";
 const BRANCH = "main";
 const STATUS_PATH = "status.json";
+const NOTIFICATION_CONFIG_PATH = "notification-config.json";
 const MAX_WRITE_ATTEMPTS = 3;
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -276,6 +277,42 @@ export class GithubClient {
     return operation;
   }
 
+  public saveNotificationConfig(schedule: PublicationScheduleConfig, subscription: PushSubscriptionData | null, vapidPublicKey = ""): Promise<void> {
+    const operation = this.writeQueue.then(() => this.saveNotificationConfigWithRetry(schedule, subscription, vapidPublicKey));
+    this.writeQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  private async saveNotificationConfigWithRetry(schedule: PublicationScheduleConfig, subscription: PushSubscriptionData | null, vapidPublicKey: string): Promise<void> {
+    const endpoint = `/repos/${OWNER}/${REPOSITORY}/contents/${NOTIFICATION_CONFIG_PATH}`;
+    for (let attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt += 1) {
+      const existing = await this.request<ContentsResponse>(`${endpoint}?ref=${BRANCH}`, {}, undefined, [404], "通知設定");
+      const current = readNotificationConfig(existing, schedule);
+      const subscriptions = subscription
+        ? [...current.subscriptions.filter((item) => item.endpoint !== subscription.endpoint), subscription]
+        : [];
+      const next: NotificationConfig = {
+        ...current,
+        schedule,
+        vapidPublicKey: vapidPublicKey || current.vapidPublicKey,
+        notificationTime: schedule.notificationTime ?? current.notificationTime,
+        subscriptions,
+      };
+      const response = await this.request<ContentsResponse>(endpoint, {
+        method: "PUT",
+        body: JSON.stringify({
+          message: "chore: update publication notification config",
+          content: encodeBase64Utf8(`${JSON.stringify(next, null, 2)}\n`),
+          ...(existing.status === 200 && existing.data.sha ? { sha: existing.data.sha } : {}),
+          branch: BRANCH,
+        }),
+      }, undefined, [], "通知設定の保存");
+      if (response.status === 200 || response.status === 201) return;
+      if (response.status !== 409 || attempt === MAX_WRITE_ATTEMPTS) break;
+    }
+    throw createGithubApiError(409, "競合", undefined, "通知設定の保存");
+  }
+
   private async updateArticleStatusWithRetry(
     path: string,
     patch: Pick<ArticleStatusEntry, "status" | "publishedUrl" | "publishedAt">,
@@ -518,9 +555,35 @@ function operationForEndpoint(endpoint: string, init: RequestInit): string {
   if (endpoint.includes("/git/trees/")) return "記事一覧";
   if (endpoint.includes("image-status.json")) return method === "PUT" ? "画像状態の保存" : "画像状態";
   if (endpoint.includes("status.json")) return method === "PUT" ? "公開状況の保存" : "公開状況";
+  if (endpoint.includes("notification-config.json")) return method === "PUT" ? "通知設定の保存" : "通知設定";
   if (endpoint.includes("/contents/") && endpoint.includes("/images/")) return method === "PUT" ? "画像の登録" : "画像";
   if (endpoint.includes("/contents/")) return method === "PUT" ? "記事本文の保存" : "記事本文";
   return "GitHub API";
+}
+
+function readNotificationConfig(response: { status: number; data: ContentsResponse }, schedule: PublicationScheduleConfig): NotificationConfig {
+  const fallback: NotificationConfig = {
+    schemaVersion: 1,
+    timezone: "Asia/Tokyo",
+    vapidPublicKey: "",
+    notificationTime: schedule.notificationTime ?? "09:00",
+    schedule,
+    subscriptions: [],
+    sentKeys: [],
+  };
+  if (response.status !== 200 || !response.data.content || response.data.encoding !== "base64") return fallback;
+  try {
+    const parsed = JSON.parse(decodeBase64Utf8(response.data.content)) as Partial<NotificationConfig>;
+    return {
+      ...fallback,
+      ...parsed,
+      schedule: parsed.schedule ?? schedule,
+      subscriptions: Array.isArray(parsed.subscriptions) ? parsed.subscriptions : [],
+      sentKeys: Array.isArray(parsed.sentKeys) ? parsed.sentKeys : [],
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 export function isArticlePath(path: string): boolean {

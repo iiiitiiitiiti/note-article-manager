@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { GithubClient, type ConnectionTestResult } from "./github";
 import { GithubApiError } from "./github-errors";
+import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKey, isNotificationConfigured, isPushSupported, requiresStandalonePwa, subscribeToPublicationNotifications, unsubscribeFromPublicationNotifications } from "./notifications";
 import { buildPublicationSchedule, DEFAULT_SCHEDULE } from "./schedule";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadPublicationSchedule, loadToken, saveArticleReturnPath, savePublicationSchedule, saveToken } from "./storage";
 
 const NOTE_COMPOSE_URL = "https://note.com/intent/post";
-import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, PublicationScheduleConfig, RepositorySnapshot } from "./types";
+import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, PublicationScheduleConfig, PushSubscriptionData, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   design: "design",
@@ -298,7 +299,7 @@ export default function App() {
       {loading && <p className="loading">GitHub から記事一覧を読み込んでいます…</p>}
       <SyncStatus state={syncState} onRetry={reload} />
       {snapshot && <RepositoryWarnings snapshot={snapshot} />}
-      {snapshot && <DashboardPanel snapshot={snapshot} schedule={schedule} onScheduleChange={updateSchedule} />}
+      {snapshot && <DashboardPanel snapshot={snapshot} schedule={schedule} onScheduleChange={updateSchedule} client={client} />}
       <HealthCheckPanel client={client} />
       <ImageInventoryPanel client={client} />
 
@@ -476,7 +477,7 @@ function imageInventoryIssueLabel(kind: ImageInventory["issues"][number]["kind"]
   return "状態のみ";
 }
 
-function DashboardPanel({ snapshot, schedule, onScheduleChange }: { snapshot: RepositorySnapshot; schedule: PublicationScheduleConfig; onScheduleChange: (next: PublicationScheduleConfig) => void }) {
+function DashboardPanel({ snapshot, schedule, onScheduleChange, client }: { snapshot: RepositorySnapshot; schedule: PublicationScheduleConfig; onScheduleChange: (next: PublicationScheduleConfig) => void; client: GithubClient }) {
   const summaries = snapshot.articles.reduce((result, article) => {
     result[article.status] += 1;
     return result;
@@ -512,13 +513,98 @@ function DashboardPanel({ snapshot, schedule, onScheduleChange }: { snapshot: Re
             <option value="all">全カテゴリ</option>
             {categories.map((category) => <option key={category} value={category}>{CATEGORY_LABELS[category] ?? category}</option>)}
           </select>
+          <label htmlFor="schedule-notification-time">通知時刻（日本時間）</label>
+          <input id="schedule-notification-time" type="time" step="900" value={schedule.notificationTime ?? DEFAULT_NOTIFICATION_TIME} onChange={(event) => onScheduleChange({ ...schedule, notificationTime: event.target.value })} />
         </div>
         {scheduled.length === 0 && <p className="inline-message">開始日時を設定すると、公開待ち記事の予定が表示されます。</p>}
         {scheduled.length > 0 && <ol className="schedule-list">{scheduled.slice(0, 8).map((item) => <li key={item.path}><time dateTime={item.scheduledAt}>{formatScheduleTime(item.scheduledAt)}</time><span>{articleDisplayName({ path: item.path, category: item.category, status: "queued", queueOrder: item.queueOrder, publishedUrl: null, publishedAt: null })}</span></li>)}</ol>}
         {scheduled.length > 8 && <p className="inline-message">ほか {scheduled.length - 8} 件</p>}
-        <p className="notification-note">iPhoneのバックグラウンド通知は、別途Web Push送信サーバーの設定が必要です。現在はこの画面で公開予定を確認できます。</p>
+        <NotificationPanel client={client} schedule={schedule} />
       </Accordion>
     </section>
+  );
+}
+
+function NotificationPanel({ client, schedule }: { client: GithubClient; schedule: PublicationScheduleConfig }) {
+  const [subscription, setSubscription] = useState<PushSubscriptionData | null>(null);
+  const [phase, setPhase] = useState<"loading" | "idle" | "saving" | "enabled" | "error">("loading");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void getCurrentPushSubscription().then((current) => {
+      if (!active) return;
+      setSubscription(current);
+      setPhase(current ? "enabled" : "idle");
+    }).catch(() => {
+      if (active) setPhase("idle");
+    });
+    return () => { active = false; };
+  }, []);
+
+  const saveRemoteConfig = async (nextSchedule: PublicationScheduleConfig, nextSubscription: PushSubscriptionData | null): Promise<boolean> => {
+    setPhase("saving");
+    setMessage("");
+    try {
+      await client.saveNotificationConfig(nextSchedule, nextSubscription, getVapidPublicKey());
+      setPhase(nextSubscription ? "enabled" : "idle");
+      setMessage(nextSubscription ? "公開予定通知を有効にしました。" : "公開予定通知を停止しました。");
+      return true;
+    } catch (saveError) {
+      setPhase("error");
+      setMessage(toError(saveError, "通知設定の保存に失敗しました。").message);
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    if (!subscription) return;
+    const timeoutId = window.setTimeout(() => void saveRemoteConfig(schedule, subscription), 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [schedule, subscription]);
+
+  const enableNotifications = async () => {
+    setPhase("saving");
+    setMessage("");
+    try {
+      const nextSubscription = await subscribeToPublicationNotifications();
+      setSubscription(nextSubscription);
+    } catch (enableError) {
+      setPhase("error");
+      setMessage(toError(enableError, "通知の登録に失敗しました。").message);
+    }
+  };
+
+  const disableNotifications = async () => {
+    const saved = await saveRemoteConfig(schedule, null);
+    if (!saved) return;
+    try {
+      await unsubscribeFromPublicationNotifications();
+      setSubscription(null);
+    } catch {
+      // The remote configuration is already disabled; a stale browser subscription is harmless.
+    }
+  };
+
+  const notificationTime = schedule.notificationTime ?? DEFAULT_NOTIFICATION_TIME;
+  const unavailableReason = !isPushSupported()
+    ? "この端末またはブラウザはWeb Pushに対応していません。"
+    : requiresStandalonePwa()
+      ? "iPhoneではホーム画面に追加したPWAから設定してください。"
+      : !isNotificationConfigured()
+        ? "管理者によるVAPID公開鍵の設定がまだ完了していません。"
+        : "";
+
+  return (
+    <div className="notification-settings">
+      <div className="notification-heading"><strong>iPhoneに公開予定を通知</strong><span>{subscription ? "有効" : "未設定"}</span></div>
+      <p className="notification-note">公開予定日の{notificationTime}（日本時間）に「記事名の公開予定日です」と通知します。通知設定と購読情報はprivate記事リポジトリに保存されます。</p>
+      {unavailableReason && <p className="inline-message">{unavailableReason}</p>}
+      {!subscription && <button className="secondary-button" type="button" disabled={phase === "saving" || phase === "loading" || Boolean(unavailableReason)} onClick={() => void enableNotifications()}>{phase === "saving" ? "通知を登録中…" : "公開予定通知を有効にする"}</button>}
+      {subscription && <button className="secondary-button" type="button" disabled={phase === "saving"} onClick={() => void disableNotifications()}>{phase === "saving" ? "通知を停止中…" : "公開予定通知を停止する"}</button>}
+      {subscription && <p className="inline-message">公開予定を変更すると、通知設定も自動で更新します。</p>}
+      {message && <p className={phase === "error" ? "error-text" : "connection-result"} role={phase === "error" ? "alert" : "status"}>{message}</p>}
+    </div>
   );
 }
 
