@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { extractLocalImagePaths, parseImagePlaceholders, replaceLocalImageSources } from "./image-plan";
-import type { ArticleContent } from "./types";
+import type { ArticleContent, NoteWarning, NoteWarningKind } from "./types";
 
 const FRONT_MATTER = /^\uFEFF?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)\r?\n/;
 const ALLOWED_TAGS = [
@@ -39,16 +39,52 @@ export function bodyForNote(markdown: string): string {
 }
 
 export function getNoteWarnings(markdown: string): string[] {
+  return getNoteWarningDetails(markdown).map((warning) => `${warning.message}（${warning.target}）`);
+}
+
+export function getNoteWarningDetails(markdown: string): NoteWarning[] {
   const content = removeFrontMatter(markdown);
-  const warnings: string[] = [];
-  if (/^\s*\|.*\|\s*$/m.test(content) && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/m.test(content)) {
-    warnings.push("Markdown の表は note で変換されません。");
+  const warnings: NoteWarning[] = [];
+  const htmlWarningLines = new Set<number>();
+  const lines = content.split(/\r?\n/);
+  const addWarning = (kind: NoteWarningKind, line: number, target: string, message: string, action: string) => {
+    warnings.push({ kind, line, target, message, action });
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const nextLine = lines[index + 1] ?? "";
+    if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(nextLine)) {
+      addWarning(
+        "table",
+        index + 1,
+        `表（${index + 1}行目）`,
+        "Markdown の表は note で自動変換されません。",
+        "手動対応: note側で表を作り直すか、表を本文から除外してください。",
+      );
+    }
   }
-  if (/!\[[^\]]*\]\([^)]*\)/.test(content)) {
-    warnings.push("Markdown の画像は note で手動アップロードが必要です。");
+  for (const match of content.matchAll(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g)) {
+    const line = lineNumberAt(content, match.index ?? 0);
+    addWarning(
+      "image",
+      line,
+      `画像「${match[2]}」（${line}行目）`,
+      "Markdown の画像は note で自動アップロードされません。",
+      "手動対応: note側で画像をアップロードし、画像準備の登録内容と照合してください。",
+    );
   }
-  if (/<\/?[A-Za-z][^>]*>/.test(content)) {
-    warnings.push("raw HTML は note でそのまま変換されません。");
+  for (const match of content.matchAll(/<\/?(?!(?:https?:\/\/|mailto:))[A-Za-z][^>]*>/gi)) {
+    const line = lineNumberAt(content, match.index ?? 0);
+    if (htmlWarningLines.has(line)) continue;
+    htmlWarningLines.add(line);
+    addWarning(
+      "html",
+      line,
+      `HTML「${match[0]}」（${line}行目）`,
+      "raw HTML は note でそのまま自動変換されません。",
+      "手動対応: HTMLをnote対応の文章・Markdownへ置き換えてください。",
+    );
   }
   return warnings;
 }
@@ -70,11 +106,17 @@ export function renderArticle(markdown: string, filePath: string, imageSources: 
     path: filePath,
     title,
     body,
+    sourceMarkdown: markdown,
     renderedHtml,
     warnings: getNoteWarnings(markdown),
+    warningDetails: getNoteWarningDetails(markdown),
     imagePlaceholders: parseImagePlaceholders(markdown),
     localImagePaths: extractLocalImagePaths(markdown, filePath),
   };
+}
+
+function lineNumberAt(content: string, offset: number): number {
+  return content.slice(0, offset).split(/\r?\n/).length;
 }
 
 function filenameTitle(filePath: string): string {
