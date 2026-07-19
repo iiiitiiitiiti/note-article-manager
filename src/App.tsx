@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { GithubClient } from "./github";
+import { GithubClient, type ConnectionTestResult } from "./github";
 import { GithubApiError } from "./github-errors";
 import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
 import { bodyForNote, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadToken, saveArticleReturnPath, saveToken } from "./storage";
 
 const NOTE_COMPOSE_URL = "https://note.com/intent/post";
-import type { ArticleContent, ArticlePath, ImageDecision, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, RepositorySnapshot } from "./types";
+import type { ArticleContent, ArticlePath, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   design: "design",
@@ -174,8 +174,14 @@ export default function App() {
     void openArticle(returnPath);
   }, [client, openArticle, returnPath, showSettings]);
 
-  const handleTokenSave = (nextToken: string) => {
-    saveToken(nextToken);
+  const testConnection = useCallback(async (): Promise<ConnectionTestResult> => {
+    if (!client) throw new Error("保存済みトークンがありません。");
+    return client.testConnection();
+  }, [client]);
+
+  const handleTokenSave = (nextToken: string, persist: boolean) => {
+    if (persist) saveToken(nextToken);
+    else clearToken();
     setToken(nextToken.trim());
     setShowSettings(false);
     setSnapshot(null);
@@ -210,10 +216,10 @@ export default function App() {
   };
 
   if (showSettings || !token) {
-    return <SettingsScreen hasToken={Boolean(token)} onSave={handleTokenSave} onResume={() => setShowSettings(false)} onClear={handleTokenClear} />;
+    return <SettingsScreen hasToken={Boolean(token)} onSave={handleTokenSave} onTestConnection={testConnection} onResume={() => setShowSettings(false)} onClear={handleTokenClear} />;
   }
   if (!client) {
-    return <SettingsScreen hasToken={false} onSave={handleTokenSave} onResume={() => setShowSettings(false)} onClear={handleTokenClear} />;
+    return <SettingsScreen hasToken={false} onSave={handleTokenSave} onTestConnection={testConnection} onResume={() => setShowSettings(false)} onClear={handleTokenClear} />;
   }
 
   if (selectedPath && (article || articleLoading || error)) {
@@ -279,6 +285,7 @@ export default function App() {
       {loading && <p className="loading">GitHub から記事一覧を読み込んでいます…</p>}
       <SyncStatus state={syncState} onRetry={reload} />
       {snapshot && <RepositoryWarnings snapshot={snapshot} />}
+      <ImageInventoryPanel client={client} />
 
       {snapshot && (
         <>
@@ -314,29 +321,52 @@ export default function App() {
   );
 }
 
-function SettingsScreen({ hasToken, onSave, onResume, onClear }: { hasToken: boolean; onSave: (token: string) => void; onResume: () => void; onClear: () => void }) {
+function SettingsScreen({ hasToken, onSave, onTestConnection, onResume, onClear }: { hasToken: boolean; onSave: (token: string, persist: boolean) => void; onTestConnection: () => Promise<ConnectionTestResult>; onResume: () => void; onClear: () => void }) {
   const [value, setValue] = useState("");
+  const [persist, setPersist] = useState(true);
+  const [testState, setTestState] = useState<{ phase: "idle" | "testing" | "success" | "error"; result?: ConnectionTestResult; error?: Error }>({ phase: "idle" });
   const canSave = value.trim().length > 0;
+  const runConnectionTest = async () => {
+    setTestState({ phase: "testing" });
+    try {
+      setTestState({ phase: "success", result: await onTestConnection() });
+    } catch (error) {
+      setTestState({ phase: "error", error: toError(error, "接続テストに失敗しました。") });
+    }
+  };
   return (
     <main className="app-shell narrow-shell">
       <p className="eyebrow">NOTE ARTICLE MANAGER</p>
       <h1>記事を、公開できる状態にする。</h1>
       <section className="settings-card">
         <h2>GitHub PAT を設定</h2>
-        <p>private な <code>iiiitiiitiiti/note-articles</code> を読むための fine-grained PAT を、この端末だけに保存します。</p>
+        <p>private な <code>iiiitiiitiiti/note-articles</code> を読むための fine-grained PAT を、この端末のブラウザから接続します。</p>
         <label htmlFor="pat">Personal access token</label>
         <input id="pat" type="password" value={value} onChange={(event) => setValue(event.target.value)} autoComplete="off" placeholder={hasToken ? "再入力する場合だけ入力" : "github_pat_…"} />
-        <button className="primary-button" type="button" disabled={!canSave} onClick={() => onSave(value)}>この端末に保存して接続</button>
+        {hasToken && <>
+          <button className="secondary-button" type="button" disabled={testState.phase === "testing"} onClick={() => void runConnectionTest()}>{testState.phase === "testing" ? "接続を確認中…" : "保存済みトークンをテスト"}</button>
+          {testState.phase === "success" && testState.result && <p className="connection-result" role="status">読み取り: 利用可能 ／ 書き込み: {writeAccessLabel(testState.result.writeAccess)}（{testState.result.repository}）</p>}
+          {testState.phase === "error" && testState.error && <ErrorNotice error={testState.error} onRetry={() => void runConnectionTest()} />}
+        </>}
+        <button className="primary-button" type="button" disabled={!canSave} onClick={() => onSave(value, persist)}>{persist ? "この端末に保存して接続" : "このセッションだけで接続"}</button>
+        <label className="checkbox-label"><input type="checkbox" checked={persist} onChange={(event) => setPersist(event.target.checked)} /> 次回起動時もこのトークンを使う</label>
         {hasToken && <button className="secondary-button settings-resume-button" type="button" onClick={onResume}>保存済みトークンで一覧に戻る</button>}
         <ul className="fine-print">
           <li>Contents の read/write だけを許可した有効期限つき PAT を使ってください。</li>
           <li>トークンは URL・ログ・GitHub Pages の公開ファイルには出しません。</li>
-          <li>ブラウザの localStorage に保存されるため、共有端末では使わないでください。</li>
+          <li>保存する場合はブラウザの localStorage に保存されます。共有端末では保存しないでください。</li>
+          <li>期限切れや権限不足は、保存済みトークンのテストで先に確認できます。</li>
         </ul>
         {hasToken && <button className="danger-button" type="button" onClick={onClear}>保存済みトークンを削除</button>}
       </section>
     </main>
   );
+}
+
+function writeAccessLabel(access: ConnectionTestResult["writeAccess"]): string {
+  if (access === "available") return "利用可能";
+  if (access === "unavailable") return "不足（保存時に失敗します）";
+  return "未確認（保存時に判定）";
 }
 
 function RepositoryWarnings({ snapshot }: { snapshot: RepositorySnapshot }) {
@@ -348,6 +378,72 @@ function RepositoryWarnings({ snapshot }: { snapshot: RepositorySnapshot }) {
       {snapshot.orphanStatusPaths.length > 0 && <p>孤児エントリ（自動削除していません）: {snapshot.orphanStatusPaths.length} 件</p>}
     </aside>
   );
+}
+
+function ImageInventoryPanel({ client }: { client: GithubClient }) {
+  const [inventory, setInventory] = useState<ImageInventory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [error, setError] = useState<Error | null>(null);
+
+  const loadInventory = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setInventory(await client.getImageInventory());
+      setSelected([]);
+    } catch (loadError) {
+      setError(toError(loadError, "画像アセットを棚卸しできませんでした。"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteSelected = async () => {
+    const targets = inventory?.issues.filter((issue) => issue.kind === "unreferenced" && issue.sha && selected.includes(issue.path)) ?? [];
+    if (targets.length === 0 || !window.confirm(`未参照画像を${targets.length}件削除します。記事本文から参照されていないことを確認しましたか？`)) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      for (const target of targets) await client.deleteImage(target.path, target.sha as string);
+      await loadInventory();
+    } catch (deleteError) {
+      setError(toError(deleteError, "画像アセットの削除に失敗しました。"));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const deletable = inventory?.issues.filter((issue) => issue.kind === "unreferenced" && issue.sha) ?? [];
+  return (
+    <Accordion className="image-inventory-card" label="画像アセット管理">
+      <p className="image-plan-intro">Git Tree・記事本文・image-status.jsonを照合し、未参照画像や壊れた参照を確認します。自動削除は行いません。</p>
+      <button className="secondary-button" type="button" disabled={loading || deleting} onClick={() => void loadInventory()}>{loading ? "棚卸し中…" : "画像アセットを確認"}</button>
+      {error && <ErrorNotice error={error} onRetry={() => void loadInventory()} />}
+      {inventory && <>
+        <p className="inline-message">記事 {inventory.scannedArticles}件・画像ファイル {inventory.scannedAssets}件を確認しました。問題候補 {inventory.issues.length}件。</p>
+        {inventory.issues.length === 0 && <p className="orphan-image-empty">未参照・壊れた参照・状態だけ残った画像はありません。</p>}
+        {inventory.issues.length > 0 && <ul className="inventory-list">
+          {inventory.issues.map((issue) => <li key={`${issue.kind}-${issue.path}`} className="inventory-item">
+            {issue.kind === "unreferenced" && issue.sha && <input type="checkbox" checked={selected.includes(issue.path)} onChange={() => setSelected((current) => current.includes(issue.path) ? current.filter((path) => path !== issue.path) : [...current, issue.path])} aria-label={`${issue.path}を削除対象に選択`} />}
+            <div><strong>{imageInventoryIssueLabel(issue.kind)}</strong> <code>{issue.path}</code>
+              {issue.articlePaths.length > 0 && <small>本文の参照: {issue.articlePaths.join("、")}</small>}
+              {issue.statusArticlePaths.length > 0 && <small>画像状態の登録: {issue.statusArticlePaths.join("、")}</small>}
+              {issue.kind === "unreferenced" && <small>削除は選択後に明示確認が必要です。Gitの履歴から復元できます。</small>}
+            </div>
+          </li>)}
+        </ul>}
+        {deletable.length > 0 && <button className="danger-button inventory-delete-button" type="button" disabled={deleting || selected.length === 0} onClick={() => void deleteSelected()}>{deleting ? "削除中…" : `選択した未参照画像を削除（${selected.length}件）`}</button>}
+      </>}
+    </Accordion>
+  );
+}
+
+function imageInventoryIssueLabel(kind: ImageInventory["issues"][number]["kind"]): string {
+  if (kind === "unreferenced") return "未参照";
+  if (kind === "broken-reference") return "壊れた参照";
+  return "状態のみ";
 }
 
 function ArticleListItem({ article, imageProgress, onOpen }: { article: ArticlePath; imageProgress: ImageProgressSummary; onOpen: (path: string) => void }) {
@@ -428,6 +524,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   const [message, setMessage] = useState("");
   const [operationError, setOperationError] = useState<ArticleOperationError | null>(null);
   const [publishedUrl, setPublishedUrl] = useState(currentStatus?.publishedUrl ?? "");
+  const [transferMode, setTransferMode] = useState<NoteTransferMode>("note");
   const [saving, setSaving] = useState(false);
   const [imageBusy, setImageBusy] = useState("");
   const [orphanImages, setOrphanImages] = useState<Record<string, string[]>>({});
@@ -435,6 +532,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
 
   useEffect(() => {
     setOrphanImages({});
+    setTransferMode("note");
   }, [selectedPath]);
 
   const reloadArticle = () => {
@@ -627,13 +725,19 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
           <section className="article-intro">
             <div className="article-intro-line"><StatusBadge status={currentStatus?.status ?? "unset"} />{article.warnings.length > 0 && <span className="warning-badge">note 非対応要素あり</span>}</div>
             <h1>{article.title}</h1>
+            <div className="transfer-mode" role="group" aria-label="コピーする本文形式">
+              <span>本文の形式</span>
+              <button className={transferMode === "note" ? "mode-button active" : "mode-button"} type="button" aria-pressed={transferMode === "note"} onClick={() => setTransferMode("note")}>note貼り付け用</button>
+              <button className={transferMode === "markdown" ? "mode-button active" : "mode-button"} type="button" aria-pressed={transferMode === "markdown"} onClick={() => setTransferMode("markdown")}>原文Markdown</button>
+            </div>
             <div className="transfer-actions">
               <button className="primary-button" type="button" onClick={() => copy("タイトル", article.title, true)}>タイトルをコピー</button>
-              <button className="secondary-button" type="button" onClick={() => copy("本文", article.body, true)}>本文をコピー</button>
+              <button className="secondary-button" type="button" disabled={transferMode === "note" && article.warningDetails.length > 0} onClick={() => copy(transferMode === "note" ? "note用本文" : "原文Markdown", transferMode === "note" ? article.body : article.sourceMarkdown, true)}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</button>
             </div>
+            {transferMode === "note" && article.warningDetails.length > 0 && <p className="inline-message transfer-blocked" role="status">note用本文は要手動対応の要素があるためコピーできません。原文Markdownをコピーするか、下の対象を確認してください。</p>}
             {message && <p className="inline-message" role="status">{message}</p>}
             {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} onOpenNote={manualCopy.openNoteAfterCopy ? openNote : undefined} />}
-            {article.warnings.length > 0 && <ul className="warning-list">{article.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+            {article.warningDetails.length > 0 && <ul className="warning-list">{article.warningDetails.map((warning) => <li key={`${warning.kind}-${warning.line}-${warning.target}`}><strong>{warning.message}</strong> <span>{warning.target}</span><br /><span>{warning.action}</span></li>)}</ul>}
           </section>
 
           {article.imagePlaceholders.length > 0 && <Accordion className="image-plan-card" label="画像の準備">

@@ -1,7 +1,7 @@
 import { mergeArticlePaths, validateStatusDocument, withArticleStatus } from "./status";
-import { emptyImageStatusDocument, filterArticleImageAssets, IMAGE_STATUS_PATH, MAX_IMAGE_BYTES, replaceImagePlaceholder, validateImageStatusDocument, withImageTaskState } from "./image-plan";
+import { emptyImageStatusDocument, extractLocalImagePaths, filterArticleImageAssets, IMAGE_STATUS_PATH, MAX_IMAGE_BYTES, replaceImagePlaceholder, validateImageStatusDocument, withImageTaskState } from "./image-plan";
 import { createGithubApiError, createGithubNetworkError } from "./github-errors";
-import type { ArticleStatusEntry, ImageStatusDocument, ImageTaskState, RepositorySnapshot, StatusDocument } from "./types";
+import type { ArticleStatusEntry, ImageInventory, ImageInventoryIssue, ImageStatusDocument, ImageTaskState, RepositorySnapshot, StatusDocument } from "./types";
 
 const API_ROOT = "https://api.github.com";
 const OWNER = "iiiitiiitiiti";
@@ -29,18 +29,34 @@ interface ContentsResponse {
 }
 
 interface TreeResponse {
-  tree?: Array<{ path?: string; type?: string }>;
+  tree?: DirectoryEntry[];
   truncated?: boolean;
 }
 
 interface DirectoryEntry {
   path?: string;
   type?: string;
+  sha?: string;
+}
+
+interface RepositoryMetadata {
+  full_name?: string;
+  permissions?: {
+    push?: boolean;
+  };
+}
+
+export type WriteAccess = "available" | "unavailable" | "unconfirmed";
+
+export interface ConnectionTestResult {
+  repository: string;
+  readAccess: "available";
+  writeAccess: WriteAccess;
 }
 
 export class GithubClient {
   private readonly token: string;
-  private treeCache?: CachedResponse<string[]>;
+  private treeCache?: CachedResponse<DirectoryEntry[]>;
   private statusCache?: CachedResponse<{ document: StatusDocument; sha: string }>;
   private imageStatusCache?: CachedResponse<{ document: ImageStatusDocument; sha: string | null }>;
   private writeQueue: Promise<unknown> = Promise.resolve();
@@ -51,6 +67,23 @@ export class GithubClient {
 
   public async loadSnapshot(): Promise<RepositorySnapshot> {
     return (await this.checkForUpdates()).snapshot;
+  }
+
+  public async testConnection(): Promise<ConnectionTestResult> {
+    await this.getStatusFile(true, "GitHub接続テスト（読み取り）");
+    const response = await this.request<RepositoryMetadata>(
+      `/repos/${OWNER}/${REPOSITORY}`,
+      {},
+      undefined,
+      [],
+      "GitHub接続テスト（権限）",
+    );
+    const push = response.data.permissions?.push;
+    return {
+      repository: response.data.full_name ?? `${OWNER}/${REPOSITORY}`,
+      readAccess: "available",
+      writeAccess: push === true ? "available" : push === false ? "unavailable" : "unconfirmed",
+    };
   }
 
   public async checkForUpdates(): Promise<SnapshotLoadResult> {
@@ -106,6 +139,90 @@ export class GithubClient {
     if (response.status === 404) return [];
     if (response.status !== 200 || !Array.isArray(response.data)) throw new Error("画像一覧を取得できませんでした。");
     return filterArticleImageAssets(articlePath, response.data);
+  }
+
+  public async getImageInventory(): Promise<ImageInventory> {
+    const tree = await this.getRepositoryTree();
+    const articlePaths = tree.value
+      .filter((entry) => entry.type === "blob" && typeof entry.path === "string" && isArticlePath(entry.path))
+      .map((entry) => entry.path as string)
+      .sort((left, right) => left.localeCompare(right, "ja"));
+    const assets = tree.value
+      .filter((entry) => entry.type === "blob" && typeof entry.path === "string" && isImageAssetPath(entry.path))
+      .map((entry) => ({ path: entry.path as string, sha: entry.sha ?? null }));
+    const imageStatus = await this.getImageStatusFile();
+    const articleContents = await Promise.all(articlePaths.map(async (path) => ({
+      path,
+      content: (await this.getArticleFile(path, "画像アセット棚卸し")).content,
+    })));
+    const references = new Map<string, string[]>();
+    for (const article of articleContents) {
+      for (const imagePath of extractLocalImagePaths(article.content, article.path)) {
+        references.set(imagePath, [...(references.get(imagePath) ?? []), article.path]);
+      }
+    }
+    const statusReferences = new Map<string, string[]>();
+    for (const [articlePath, article] of Object.entries(imageStatus.value.document.articles)) {
+      for (const task of Object.values(article.tasks)) {
+        if (!task.assetPath) continue;
+        statusReferences.set(task.assetPath, [...(statusReferences.get(task.assetPath) ?? []), articlePath]);
+      }
+    }
+
+    const issues: ImageInventoryIssue[] = [];
+    const knownAssets = new Set(assets.map((asset) => asset.path));
+    for (const asset of assets) {
+      const articlePathsForAsset = references.get(asset.path) ?? [];
+      if (articlePathsForAsset.length === 0) {
+        issues.push({
+          kind: "unreferenced",
+          path: asset.path,
+          articlePaths: [],
+          statusArticlePaths: statusReferences.get(asset.path) ?? [],
+          sha: asset.sha,
+        });
+      }
+    }
+    for (const [path, articlePathsForAsset] of references) {
+      if (!knownAssets.has(path)) {
+        issues.push({
+          kind: "broken-reference",
+          path,
+          articlePaths: articlePathsForAsset,
+          statusArticlePaths: statusReferences.get(path) ?? [],
+          sha: null,
+        });
+      }
+    }
+    for (const [path, articlePathsForAsset] of statusReferences) {
+      if (!knownAssets.has(path) && !references.has(path)) {
+        issues.push({
+          kind: "status-only",
+          path,
+          articlePaths: [],
+          statusArticlePaths: articlePathsForAsset,
+          sha: null,
+        });
+      }
+    }
+    issues.sort((left, right) => `${left.kind}:${left.path}`.localeCompare(`${right.kind}:${right.path}`, "ja"));
+    return { issues, scannedArticles: articlePaths.length, scannedAssets: assets.length };
+  }
+
+  public async deleteImage(path: string, sha: string): Promise<void> {
+    if (!isImageAssetPath(path) || !sha) throw new Error("削除対象の画像情報が不正です。");
+    const response = await this.request<ContentsResponse>(
+      `/repos/${OWNER}/${REPOSITORY}/contents/${encodePath(path)}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({ message: `image: remove orphan ${path}`, sha, branch: BRANCH }),
+      },
+      undefined,
+      [],
+      "孤児画像の削除",
+    );
+    if (response.status !== 200) throw new Error(`孤児画像の削除に失敗しました (${response.status})`);
+    this.treeCache = undefined;
   }
 
   public async uploadImage(path: string, bytes: Uint8Array): Promise<void> {
@@ -252,7 +369,7 @@ export class GithubClient {
     throw createGithubApiError(409, "競合", undefined, "記事本文の保存");
   }
 
-  private async getArticlePaths(): Promise<CachedResponse<string[]>> {
+  private async getRepositoryTree(): Promise<CachedResponse<DirectoryEntry[]>> {
     const response = await this.request<TreeResponse>(
       `/repos/${OWNER}/${REPOSITORY}/git/trees/${BRANCH}?recursive=1`,
       {},
@@ -265,19 +382,26 @@ export class GithubClient {
     if (response.data.truncated) {
       throw new Error("GitHub の記事ツリーが大きすぎるため、安全のため表示を中止しました。");
     }
-    const paths = response.data.tree
-      .filter((entry) => entry.type === "blob" && typeof entry.path === "string" && isArticlePath(entry.path))
-      .map((entry) => entry.path as string)
-      .sort((left, right) => left.localeCompare(right, "ja"));
-    this.treeCache = { etag: response.etag, value: paths, changed: true };
+    this.treeCache = { etag: response.etag, value: response.data.tree, changed: true };
     return this.treeCache;
   }
 
-  private async getStatusFile(force = false): Promise<CachedResponse<{ document: StatusDocument; sha: string }>> {
+  private async getArticlePaths(): Promise<CachedResponse<string[]>> {
+    const tree = await this.getRepositoryTree();
+    const paths = tree.value
+      .filter((entry) => entry.type === "blob" && typeof entry.path === "string" && isArticlePath(entry.path))
+      .map((entry) => entry.path as string)
+      .sort((left, right) => left.localeCompare(right, "ja"));
+    return { etag: tree.etag, value: paths, changed: tree.changed };
+  }
+
+  private async getStatusFile(force = false, operation = "公開状況"): Promise<CachedResponse<{ document: StatusDocument; sha: string }>> {
     const response = await this.request<ContentsResponse>(
       `/repos/${OWNER}/${REPOSITORY}/contents/${STATUS_PATH}?ref=${BRANCH}`,
       {},
       force ? undefined : this.statusCache?.etag ?? undefined,
+      [],
+      operation,
     );
     if (response.status === 304 && this.statusCache) return { ...this.statusCache, changed: false };
     if (response.status !== 200 || !response.data.content || response.data.encoding !== "base64") {
@@ -386,6 +510,13 @@ export function isArticlePath(path: string): boolean {
   if (!category || !filename || category.startsWith("_") || category === "assets") return false;
   if (filename === "README.md" || filename === "IDEAS.md") return false;
   return ["book-review", "design", "disney", "essay", "tools", "web-review"].includes(category);
+}
+
+function isImageAssetPath(path: string): boolean {
+  const category = path.split("/", 1)[0];
+  return ["book-review", "design", "disney", "essay", "tools", "web-review"].includes(category)
+    && path.includes("/images/")
+    && /\.(?:png|jpe?g|webp|gif)$/i.test(path);
 }
 
 function encodePath(value: string): string {

@@ -40,6 +40,18 @@ export interface ImageProgressSummary {
   skip: number;
 }
 
+export type NoteTransferMode = "note" | "markdown";
+
+export type NoteWarningKind = "table" | "image" | "html";
+
+export interface NoteWarning {
+  kind: NoteWarningKind;
+  line: number;
+  target: string;
+  message: string;
+  action: string;
+}
+
 export interface ArticlePath {
   path: string;
   category: string;
@@ -53,10 +65,28 @@ export interface ArticleContent {
   path: string;
   title: string;
   body: string;
+  sourceMarkdown: string;
   renderedHtml: string;
   warnings: string[];
+  warningDetails: NoteWarning[];
   imagePlaceholders: ImagePlaceholder[];
   localImagePaths: string[];
+}
+
+export type ImageInventoryIssueKind = "unreferenced" | "broken-reference" | "status-only";
+
+export interface ImageInventoryIssue {
+  kind: ImageInventoryIssueKind;
+  path: string;
+  articlePaths: string[];
+  statusArticlePaths: string[];
+  sha: string | null;
+}
+
+export interface ImageInventory {
+  issues: ImageInventoryIssue[];
+  scannedArticles: number;
+  scannedAssets: number;
 }
 
 export interface ImagePlaceholder {

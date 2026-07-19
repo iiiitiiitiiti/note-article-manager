@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GithubClient } from "../src/github.ts";
+import { GithubApiError } from "../src/github-errors.ts";
 
 const articlePath = "design/01_one.md";
 
@@ -44,6 +45,110 @@ test("snapshot checks use ETags and report 304 responses as unchanged", async ()
     assert.equal(calls[3].headers.get("if-none-match"), '"tree-1"');
     assert.equal(calls[4].headers.get("if-none-match"), '"status-1"');
     assert.equal(calls[5].headers.get("if-none-match"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+function jsonResponse(statusCode, body, headers = {}) {
+  return new Response(JSON.stringify(body), { status: statusCode, headers });
+}
+
+function contentsResponse(value, sha = "file-sha") {
+  return { content: Buffer.from(value).toString("base64"), encoding: "base64", sha };
+}
+
+test("saved PAT connection test verifies read access and repository write permission", async () => {
+  const originalFetch = globalThis.fetch;
+  const status = JSON.stringify({ schemaVersion: 1, articles: {} });
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (calls.length === 1) return jsonResponse(200, contentsResponse(status, "status-sha"));
+    return jsonResponse(200, { full_name: "iiiitiiitiiti/note-articles", permissions: { push: true } });
+  };
+
+  try {
+    const result = await new GithubClient("test-token").testConnection();
+    assert.deepEqual(result, { repository: "iiiitiiitiiti/note-articles", readAccess: "available", writeAccess: "available" });
+    assert.equal(new Headers(calls[0].init.headers).get("authorization"), "Bearer test-token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("GitHub API status failures retain actionable classifications without exposing the token", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    [401, "authentication"],
+    [403, "permission"],
+    [404, "not-found"],
+    [503, "temporary"],
+  ];
+  try {
+    for (const [statusCode, kind] of cases) {
+      globalThis.fetch = async () => jsonResponse(statusCode, { message: "failure" });
+      await assert.rejects(
+        () => new GithubClient("secret-token").getArticle(articlePath),
+        (error) => {
+          assert.ok(error instanceof GithubApiError);
+          assert.equal(error.kind, kind);
+          assert.doesNotMatch(error.message, /secret-token/);
+          return true;
+        },
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("image upload includes the existing SHA and retries a 409 conflict", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (calls.length === 1) return jsonResponse(200, { sha: "old-sha" });
+    if (calls.length === 2) return jsonResponse(409, { message: "Conflict" });
+    if (calls.length === 3) return jsonResponse(404, { message: "Not Found" });
+    return jsonResponse(201, { sha: "new-sha" });
+  };
+
+  try {
+    await new GithubClient("test-token").uploadImage("design/images/example.png", new Uint8Array([1, 2, 3]));
+    const firstPut = JSON.parse(calls[1].init.body);
+    const secondPut = JSON.parse(calls[3].init.body);
+    assert.equal(firstPut.sha, "old-sha");
+    assert.equal(secondPut.sha, undefined);
+    assert.equal(firstPut.content, "AQID");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("image inventory distinguishes unreferenced files, broken links, and status-only paths", async () => {
+  const originalFetch = globalThis.fetch;
+  const article = "# One\n\n![broken](images/missing.png)\n";
+  const imageStatus = JSON.stringify({ schemaVersion: 1, articles: { [articlePath]: { tasks: { stale: { decision: "provide", assetPath: "design/images/status-only.png", registrationStage: "completed", updatedAt: null } } } } });
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.includes("/git/trees/")) return jsonResponse(200, { tree: [
+      { type: "blob", path: articlePath, sha: "article-sha" },
+      { type: "blob", path: "design/images/orphan.png", sha: "orphan-sha" },
+    ] });
+    if (value.endsWith("/contents/image-status.json?ref=main")) return jsonResponse(200, contentsResponse(imageStatus, "image-status-sha"));
+    if (value.includes(`/contents/${articlePath}?ref=main`)) return jsonResponse(200, contentsResponse(article, "article-sha"));
+    throw new Error(`unexpected request ${value}`);
+  };
+
+  try {
+    const inventory = await new GithubClient("test-token").getImageInventory();
+    assert.deepEqual(inventory.issues.map((issue) => [issue.kind, issue.path]), [
+      ["broken-reference", "design/images/missing.png"],
+      ["status-only", "design/images/status-only.png"],
+      ["unreferenced", "design/images/orphan.png"],
+    ]);
+    assert.equal(inventory.issues.find((issue) => issue.path === "design/images/orphan.png").sha, "orphan-sha");
   } finally {
     globalThis.fetch = originalFetch;
   }
