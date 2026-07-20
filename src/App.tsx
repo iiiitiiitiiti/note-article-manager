@@ -4,7 +4,7 @@ import { GithubApiError } from "./github-errors";
 import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKey, isNotificationConfigured, isPushSupported, requiresStandalonePwa, subscribeToPublicationNotifications, unsubscribeFromPublicationNotifications } from "./notifications";
 import { buildPublicationSchedule, DEFAULT_SCHEDULE, getPublicationScheduleFrequency, hasMissingPublicationOrders, WEEKDAY_OPTIONS } from "./schedule";
 import { buildImageAssetPath, getImageTaskState, hasUnpreparedImageTasks, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
-import { hasBlockingNoteWarnings, renderArticle } from "./markdown";
+import { hasBlockingNoteWarnings, noteClipboardDocument, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadNoteComposerArticle, loadPublicationSchedule, loadToken, saveArticleReturnPath, saveNoteComposerArticle, savePublicationSchedule, saveToken } from "./storage";
 
 const NOTE_APP_URL = "https://note.com/intent/post";
@@ -823,7 +823,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
       setManualCopy({ label, text, openNoteAfterCopy });
       return;
     }
-    const write = label === "note用本文" && article ? writeNoteClipboard(article, text) : navigator.clipboard.writeText(text);
+    const write = label === "note用本文" && article ? writeNoteClipboard(article) : navigator.clipboard.writeText(text);
     void write.then(
       () => {
         setMessage(`${label}をコピーしました。`);
@@ -1067,21 +1067,24 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   );
 }
 
-function writeNoteClipboard(article: ArticleContent, text: string): Promise<void> {
+function writeNoteClipboard(article: ArticleContent): Promise<void> {
+  if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+    try {
+      const item = new ClipboardItem({
+        "text/html": new Blob([noteClipboardDocument(article.noteHtml)], { type: "text/html" }),
+      });
+      return navigator.clipboard.write([item]).catch((error) => {
+        if (copyRichHtmlToClipboard(article.noteHtml)) return;
+        throw error;
+      });
+    } catch {
+      // Fall through to the browser-native selection copy.
+    }
+  }
   if (copyRichHtmlToClipboard(article.noteHtml)) {
     return Promise.resolve();
   }
-  if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
-    const item = new ClipboardItem({
-      "text/plain": new Blob([text], { type: "text/plain" }),
-      "text/html": new Blob([article.noteHtml], { type: "text/html" }),
-    });
-    return navigator.clipboard.write([item]);
-  }
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text);
-  }
-  return Promise.reject(new Error("リッチクリップボードに対応していません。"));
+  return Promise.reject(new Error("この端末ではリッチコピーに対応していません。"));
 }
 
 function copyRichHtmlToClipboard(html: string): boolean {

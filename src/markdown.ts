@@ -42,6 +42,10 @@ export function noteClipboardHtml(markdown: string, filePath: string, imageSourc
   return sanitizeNoteHtml(rawHtml);
 }
 
+export function noteClipboardDocument(htmlFragment: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body><!--StartFragment-->${htmlFragment}<!--EndFragment--></body></html>`;
+}
+
 function bodyWithoutTitle(markdown: string): string {
   let body = removeFrontMatter(markdown).replace(/^\s+/, "");
   if (/^#\s+/.test(body)) {
