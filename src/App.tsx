@@ -783,12 +783,46 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   const [imageBusy, setImageBusy] = useState("");
   const [orphanImages, setOrphanImages] = useState<Record<string, string[]>>({});
   const [orphanCheckBusy, setOrphanCheckBusy] = useState("");
+  const articlePreviewRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     setOrphanImages({});
     setTransferMode("note");
     setNoteComposerOpened(loadNoteComposerArticle() === selectedPath);
   }, [selectedPath]);
+
+  useEffect(() => {
+    const preview = articlePreviewRef.current;
+    if (!preview || !article) return;
+    const cleanups: Array<() => void> = [];
+    const images = Array.from(preview.querySelectorAll<HTMLImageElement>("img"));
+    images.forEach((image, index) => {
+      const source = image.currentSrc || image.src;
+      if (!/^data:image\//i.test(source)) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "image-copy-button";
+      button.textContent = `画像${index + 1}をコピー`;
+      const handleClick = () => {
+        button.disabled = true;
+        button.textContent = "画像をコピー中…";
+        void copyImageToClipboard(source).then(
+          () => setMessage(`画像${index + 1}をコピーしました。note側で貼り付けてください。`),
+          (copyError) => setMessage(toError(copyError, "画像のコピーに失敗しました。").message),
+        ).finally(() => {
+          button.disabled = false;
+          button.textContent = `画像${index + 1}をコピー`;
+        });
+      };
+      button.addEventListener("click", handleClick);
+      image.insertAdjacentElement("afterend", button);
+      cleanups.push(() => {
+        button.removeEventListener("click", handleClick);
+        button.remove();
+      });
+    });
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [article]);
 
   const reloadArticle = () => {
     setOperationError(null);
@@ -1065,7 +1099,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             <button className="primary-button" type="button" disabled={saving || !isHttpUrl(publishedUrl)} onClick={() => void savePublished()}>{saving ? "保存中…" : "公開済みにする"}</button>
           </Accordion>
 
-          <article className="markdown-preview" dangerouslySetInnerHTML={{ __html: article.renderedHtml }} />
+          <article ref={articlePreviewRef} className="markdown-preview" dangerouslySetInnerHTML={{ __html: article.renderedHtml }} />
         </>
       )}
     </main>
@@ -1097,6 +1131,17 @@ function writeNoteClipboard(article: ArticleContent): Promise<void> {
     return Promise.resolve();
   }
   return Promise.reject(new Error("この端末ではリッチコピーに対応していません。"));
+}
+
+async function copyImageToClipboard(source: string): Promise<void> {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    throw new Error("この端末では画像の直接コピーに対応していません。画像を長押しまたは右クリックして保存してください。");
+  }
+  const response = await fetch(source);
+  if (!response.ok) throw new Error("画像データを取得できませんでした。記事を再読み込みしてください。");
+  const blob = await response.blob();
+  const type = blob.type || "image/png";
+  await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
 }
 
 function copyRichHtmlToClipboard(html: string, plainText: string): boolean {
