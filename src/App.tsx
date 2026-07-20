@@ -799,26 +799,46 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
     images.forEach((image, index) => {
       const source = image.currentSrc || image.src;
       if (!/^data:image\//i.test(source)) return;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "image-copy-button";
-      button.textContent = `画像${index + 1}をコピー`;
-      const handleClick = () => {
-        button.disabled = true;
-        button.textContent = "画像をコピー中…";
+      const actions = document.createElement("div");
+      actions.className = "image-copy-actions";
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "image-copy-button";
+      copyButton.textContent = `画像${index + 1}をコピー`;
+      const handleCopyClick = () => {
+        copyButton.disabled = true;
+        copyButton.textContent = "画像をコピー中…";
         void copyImageToClipboard(source).then(
           () => setMessage(`画像${index + 1}をコピーしました。note側で貼り付けてください。`),
           (copyError) => setMessage(toError(copyError, "画像のコピーに失敗しました。").message),
         ).finally(() => {
-          button.disabled = false;
-          button.textContent = `画像${index + 1}をコピー`;
+          copyButton.disabled = false;
+          copyButton.textContent = `画像${index + 1}をコピー`;
         });
       };
-      button.addEventListener("click", handleClick);
-      image.insertAdjacentElement("afterend", button);
+      copyButton.addEventListener("click", handleCopyClick);
+      const downloadButton = document.createElement("button");
+      downloadButton.type = "button";
+      downloadButton.className = "image-download-button";
+      downloadButton.textContent = `画像${index + 1}をダウンロード`;
+      const handleDownloadClick = () => {
+        downloadButton.disabled = true;
+        downloadButton.textContent = "ダウンロード中…";
+        void downloadImage(source, `${selectedPath.split("/").at(-1)?.replace(/\.md$/i, "") ?? "article"}-image-${index + 1}`).then(
+          () => setMessage(`画像${index + 1}をダウンロードしました。`),
+          (downloadError) => setMessage(toError(downloadError, "画像のダウンロードに失敗しました。").message),
+        ).finally(() => {
+          downloadButton.disabled = false;
+          downloadButton.textContent = `画像${index + 1}をダウンロード`;
+        });
+      };
+      downloadButton.addEventListener("click", handleDownloadClick);
+      actions.append(copyButton, downloadButton);
+      image.insertAdjacentElement("afterend", actions);
       cleanups.push(() => {
-        button.removeEventListener("click", handleClick);
-        button.remove();
+        copyButton.removeEventListener("click", handleCopyClick);
+        downloadButton.removeEventListener("click", handleDownloadClick);
+        actions.remove();
       });
     });
     return () => cleanups.forEach((cleanup) => cleanup());
@@ -1142,6 +1162,19 @@ async function copyImageToClipboard(source: string): Promise<void> {
   const blob = await response.blob();
   const type = blob.type || "image/png";
   await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
+}
+
+async function downloadImage(source: string, filename: string): Promise<void> {
+  const response = await fetch(source);
+  if (!response.ok) throw new Error("画像データを取得できませんでした。記事を再読み込みしてください。");
+  const blob = await response.blob();
+  const extension = blob.type.split("/", 2)[1]?.replace("jpeg", "jpg") || "png";
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${filename}.${extension}`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function copyRichHtmlToClipboard(html: string, plainText: string): boolean {
