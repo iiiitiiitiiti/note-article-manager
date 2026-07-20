@@ -9,6 +9,7 @@ const ALLOWED_TAGS = [
   "img", "li", "ol", "p", "pre", "strong", "table", "tbody", "td", "th", "thead", "tr", "ul",
 ];
 const ALLOWED_ATTR = ["alt", "href", "rel", "src", "target", "title"];
+const MARKDOWN_IMAGE_PATTERN = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g;
 
 export function removeFrontMatter(markdown: string): string {
   return markdown.replace(FRONT_MATTER, "");
@@ -27,6 +28,21 @@ export function extractTitle(markdown: string, filePath: string): string {
 }
 
 export function bodyForNote(markdown: string): string {
+  return bodyForNoteImages(bodyWithoutTitle(markdown));
+}
+
+export function noteClipboardHtml(markdown: string, filePath: string, imageSources: Record<string, string> = {}): string {
+  const body = replaceLocalImageSources(bodyWithoutTitle(markdown), filePath, imageSources).replace(MARKDOWN_IMAGE_PATTERN, (full, alt: string, href: string) => {
+    if (/^data:image\//i.test(href)) return full;
+    return `【画像：${describeImageAlt(alt)}】`;
+  });
+  const renderer = new marked.Renderer();
+  renderer.html = () => "";
+  const rawHtml = marked.parse(body, { renderer, gfm: true, async: false }) as string;
+  return sanitizeNoteHtml(rawHtml);
+}
+
+function bodyWithoutTitle(markdown: string): string {
   let body = removeFrontMatter(markdown).replace(/^\s+/, "");
   if (/^#\s+/.test(body)) {
     body = body.replace(/^#\s+[^\r\n]*(?:\r?\n|$)/, "");
@@ -36,6 +52,10 @@ export function bodyForNote(markdown: string): string {
     body = body.replace(/^[^\r\n]*(?:\r?\n|$)/, "");
   }
   return body.replace(/^\s+/, "").trimEnd();
+}
+
+export function hasBlockingNoteWarnings(warnings: NoteWarning[]): boolean {
+  return warnings.some((warning) => warning.kind !== "image");
 }
 
 export function getNoteWarnings(markdown: string): string[] {
@@ -64,14 +84,14 @@ export function getNoteWarningDetails(markdown: string): NoteWarning[] {
       );
     }
   }
-  for (const match of content.matchAll(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g)) {
+  for (const match of content.matchAll(MARKDOWN_IMAGE_PATTERN)) {
     const line = lineNumberAt(content, match.index ?? 0);
     addWarning(
       "image",
       line,
       `画像「${match[2]}」（${line}行目）`,
-      "Markdown の画像は note で自動アップロードされません。",
-      "手動対応: note側で画像をアップロードし、画像準備の登録内容と照合してください。",
+      "Markdown の画像は note へ自動アップロードされないため、画像用プレースホルダーへ変換します。",
+      "手動対応: note側でこの位置に画像をアップロードしてください。",
     );
   }
   for (const match of content.matchAll(/<\/?(?!(?:https?:\/\/|mailto:))[A-Za-z][^>]*>/gi)) {
@@ -92,6 +112,7 @@ export function getNoteWarningDetails(markdown: string): NoteWarning[] {
 export function renderArticle(markdown: string, filePath: string, imageSources: Record<string, string> = {}): ArticleContent {
   const title = extractTitle(markdown, filePath);
   const body = bodyForNote(markdown);
+  const noteHtml = noteClipboardHtml(markdown, filePath, imageSources);
   const renderedMarkdown = replaceLocalImageSources(markdown, filePath, imageSources);
   const renderer = new marked.Renderer();
   renderer.html = () => "";
@@ -106,6 +127,7 @@ export function renderArticle(markdown: string, filePath: string, imageSources: 
     path: filePath,
     title,
     body,
+    noteHtml,
     sourceMarkdown: markdown,
     renderedHtml,
     warnings: getNoteWarnings(markdown),
@@ -117,6 +139,25 @@ export function renderArticle(markdown: string, filePath: string, imageSources: 
 
 function lineNumberAt(content: string, offset: number): number {
   return content.slice(0, offset).split(/\r?\n/).length;
+}
+
+function bodyForNoteImages(body: string): string {
+  return body.replace(MARKDOWN_IMAGE_PATTERN, (_full, alt: string) => {
+    return `【画像：${describeImageAlt(alt)}】`;
+  });
+}
+
+function sanitizeNoteHtml(html: string): string {
+  if (typeof DOMPurify.sanitize !== "function") return html;
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
+    FORBID_ATTR: ["style", "onerror", "onclick"],
+  });
+}
+
+function describeImageAlt(alt: string): string {
+  return alt.trim().replace(/[【】]/g, "") || "画像";
 }
 
 function filenameTitle(filePath: string): string {
