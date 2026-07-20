@@ -48,6 +48,8 @@ type ImagePreparationTask = {
   state: ImageTaskState;
 };
 
+type ArticleHistoryMode = "push" | "none";
+
 type SyncPhase = "idle" | "checking" | "updated" | "unchanged" | "error";
 
 type SyncState = {
@@ -62,7 +64,7 @@ const FOREGROUND_COOLDOWN_MS = 30 * 1000;
 export default function App() {
   const [token, setToken] = useState(loadToken);
   const [showSettings, setShowSettings] = useState(!token);
-  const [returnPath, setReturnPath] = useState(loadArticleReturnPath);
+  const [returnPath, setReturnPath] = useState(() => getArticlePathFromLocation() || loadArticleReturnPath());
   const [snapshot, setSnapshot] = useState<RepositorySnapshot | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("design");
   const [searchQuery, setSearchQuery] = useState("");
@@ -144,17 +146,18 @@ export default function App() {
     };
   }, [client, showSettings, sync, token]);
 
-  const applyPendingSnapshot = () => {
+  const applyPendingSnapshot = useCallback(() => {
     if (!pendingSnapshot) return;
     setSnapshot(pendingSnapshot);
     setPendingSnapshot(null);
     setSyncState((current) => ({ ...current, phase: "updated" }));
-  };
+  }, [pendingSnapshot]);
 
   const reload = () => void sync("manual");
 
-  const openArticle = useCallback(async (path: string) => {
+  const openArticle = useCallback(async (path: string, historyMode: ArticleHistoryMode = "push") => {
     if (!client) return;
+    if (historyMode === "push") pushArticleHistory(path);
     saveArticleReturnPath(path);
     setReturnScrollY(window.scrollY);
     setSelectedPath(path);
@@ -188,6 +191,37 @@ export default function App() {
     }
   }, [client]);
 
+  const clearArticleView = useCallback(() => {
+    applyPendingSnapshot();
+    clearArticleReturnPath();
+    setReturnPath("");
+    setSelectedPath(null);
+    setArticle(null);
+    setError(null);
+  }, [applyPendingSnapshot]);
+
+  const handleArticleBack = useCallback(() => {
+    if (selectedPath && getArticlePathFromHistoryState(window.history.state) === selectedPath) {
+      window.history.back();
+      return;
+    }
+    clearArticleHistory();
+    clearArticleView();
+  }, [clearArticleView, selectedPath]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = getArticlePathFromLocation();
+      if (path) {
+        void openArticle(path, "none");
+        return;
+      }
+      clearArticleView();
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [clearArticleView, openArticle]);
+
   useEffect(() => {
     if (selectedPath !== null || returnScrollY === null) return;
     const scrollY = returnScrollY;
@@ -202,7 +236,7 @@ export default function App() {
     if (!returnPath || !client || showSettings) return;
     clearArticleReturnPath();
     setReturnPath("");
-    void openArticle(returnPath);
+    void openArticle(returnPath, getArticlePathFromLocation() === returnPath ? "none" : "push");
   }, [client, openArticle, returnPath, showSettings]);
 
   const testConnection = useCallback(async (): Promise<ConnectionTestResult> => {
@@ -213,6 +247,7 @@ export default function App() {
   const handleTokenSave = (nextToken: string, persist: boolean) => {
     if (persist) saveToken(nextToken);
     else clearToken();
+    clearArticleHistory();
     clearArticleReturnPath();
     setToken(nextToken.trim());
     setReturnPath("");
@@ -229,6 +264,7 @@ export default function App() {
 
   const handleTokenClear = () => {
     clearToken();
+    clearArticleHistory();
     clearArticleReturnPath();
     setToken("");
     setReturnPath("");
@@ -245,6 +281,7 @@ export default function App() {
 
   const openSettings = () => {
     applyPendingSnapshot();
+    clearArticleHistory();
     clearArticleReturnPath();
     setShowSettings(true);
     setReturnPath("");
@@ -275,13 +312,13 @@ export default function App() {
         currentStatus={snapshot?.articles.find((item) => item.path === selectedPath)}
         client={client}
         imageStatus={snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }}
-        onBack={() => { applyPendingSnapshot(); clearArticleReturnPath(); setReturnPath(""); setSelectedPath(null); setArticle(null); setError(null); }}
+        onBack={handleArticleBack}
         onPrepareNoteNavigation={() => saveArticleReturnPath(selectedPath)}
         onImageStatusSaved={(imageStatus) => {
           setSnapshot((current) => current ? { ...current, imageStatus } : current);
           setPendingSnapshot((current) => current ? { ...current, imageStatus } : current);
         }}
-        onArticleUpdated={() => void openArticle(selectedPath)}
+        onArticleUpdated={() => void openArticle(selectedPath, "none")}
         onSaved={async (updatedStatus) => {
           const applyStatus = (current: RepositorySnapshot | null) => current ? {
             ...current,
@@ -295,7 +332,7 @@ export default function App() {
           setPendingSnapshot(applyStatus);
         }}
         error={error}
-        onRetry={() => void openArticle(selectedPath)}
+        onRetry={() => void openArticle(selectedPath, "none")}
         onSyncRetry={reload}
         onOpenSettings={openSettings}
         syncState={syncState}
@@ -1321,6 +1358,36 @@ function ErrorNotice({ error, onRetry, onOpenSettings, onReloadArticle, onCheckO
 function imageMarkdownFor(description: string, assetPath: string): string {
   const assetName = assetPath.split("/images/").at(-1) ?? assetPath;
   return `![${description}](images/${assetName})`;
+}
+
+function pushArticleHistory(path: string): void {
+  const url = new URL(window.location.href);
+  url.hash = `article=${encodeURIComponent(path)}`;
+  window.history.pushState({ articlePath: path }, "", url);
+}
+
+function clearArticleHistory(): void {
+  if (!window.location.hash.startsWith("#article=")) return;
+  const url = new URL(window.location.href);
+  url.hash = "";
+  window.history.replaceState(null, "", url);
+}
+
+function getArticlePathFromLocation(): string {
+  const prefix = "#article=";
+  if (!window.location.hash.startsWith(prefix)) return "";
+  try {
+    const path = decodeURIComponent(window.location.hash.slice(prefix.length));
+    return path.includes("/") && path.endsWith(".md") && !path.includes("..") ? path : "";
+  } catch {
+    return "";
+  }
+}
+
+function getArticlePathFromHistoryState(state: unknown): string {
+  if (!state || typeof state !== "object") return "";
+  const path = (state as { articlePath?: unknown }).articlePath;
+  return typeof path === "string" ? path : "";
 }
 
 function toError(value: unknown, fallback: string): Error {
