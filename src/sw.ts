@@ -1,3 +1,4 @@
+import { clientsClaim } from "workbox-core";
 import { cleanupOutdatedCaches, precacheAndRoute } from "workbox-precaching";
 
 type WaitableEvent = { waitUntil(promise: Promise<unknown>): void };
@@ -15,6 +16,9 @@ declare global {
 }
 
 precacheAndRoute(self.__WB_MANIFEST);
+const serviceWorker = self as unknown as { skipWaiting(): Promise<void> };
+void serviceWorker.skipWaiting();
+clientsClaim();
 const worker = self as unknown as ServiceWorkerRuntime;
 cleanupOutdatedCaches();
 
