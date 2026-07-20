@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bodyForNote, getNoteWarningDetails, getNoteWarnings, hasBlockingNoteWarnings, noteClipboardHtml } from "../src/markdown.ts";
+import { bodyForNote, getNoteWarningDetails, getNoteWarnings, hasBlockingNoteWarnings, noteClipboardDocument, noteClipboardHtml } from "../src/markdown.ts";
 
 test("note body removes front matter and the article title", () => {
   const markdown = "---\ntags: [test]\n---\n# Title\n\n本文\n";
@@ -23,6 +23,12 @@ test("note clipboard HTML embeds available images and preserves text structure",
   assert.match(html, /<p>本文<\/p>/);
   assert.match(html, /<h2>見出し<\/h2>/);
   assert.match(html, /<img src="data:image\/png;base64,AA==" alt="見出し画像">/);
+
+  const document = noteClipboardDocument(html);
+  assert.match(document, /^<!doctype html>/i);
+  assert.match(document, /<!--StartFragment-->/);
+  assert.match(document, /<h2>見出し<\/h2>/);
+  assert.match(document, /<img src="data:image\/png;base64,AA==" alt="見出し画像">/);
 });
 
 test("unsupported note elements include line and target information", () => {
