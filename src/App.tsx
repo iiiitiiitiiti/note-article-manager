@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { GithubClient, type ConnectionTestResult } from "./github";
 import { GithubApiError } from "./github-errors";
 import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKey, isNotificationConfigured, isPushSupported, requiresStandalonePwa, subscribeToPublicationNotifications, unsubscribeFromPublicationNotifications } from "./notifications";
@@ -783,66 +783,32 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   const [imageBusy, setImageBusy] = useState("");
   const [orphanImages, setOrphanImages] = useState<Record<string, string[]>>({});
   const [orphanCheckBusy, setOrphanCheckBusy] = useState("");
-  const articlePreviewRef = useRef<HTMLElement | null>(null);
-
   useEffect(() => {
     setOrphanImages({});
     setTransferMode("note");
     setNoteComposerOpened(loadNoteComposerArticle() === selectedPath);
   }, [selectedPath]);
 
-  useEffect(() => {
-    const preview = articlePreviewRef.current;
-    if (!preview || !article) return;
-    const cleanups: Array<() => void> = [];
-    const images = Array.from(preview.querySelectorAll<HTMLImageElement>("img"));
-    images.forEach((image, index) => {
-      const source = image.currentSrc || image.src;
-      if (!/^data:image\//i.test(source)) return;
-      const actions = document.createElement("div");
-      actions.className = "image-copy-actions";
-      const copyButton = document.createElement("button");
-      copyButton.type = "button";
-      copyButton.className = "image-copy-button";
-      copyButton.textContent = `画像${index + 1}をコピー`;
-      const handleCopyClick = () => {
-        copyButton.disabled = true;
-        copyButton.textContent = "画像をコピー中…";
-        void copyImageToClipboard(source).then(
-          () => setMessage(`画像${index + 1}をコピーしました。note側で貼り付けてください。`),
-          (copyError) => setMessage(toError(copyError, "画像のコピーに失敗しました。").message),
-        ).finally(() => {
-          copyButton.disabled = false;
-          copyButton.textContent = `画像${index + 1}をコピー`;
-        });
-      };
-      copyButton.addEventListener("click", handleCopyClick);
-      const downloadButton = document.createElement("button");
-      downloadButton.type = "button";
-      downloadButton.className = "image-download-button";
-      downloadButton.textContent = `画像${index + 1}をダウンロード`;
-      const handleDownloadClick = () => {
-        downloadButton.disabled = true;
-        downloadButton.textContent = "ダウンロード中…";
-        void downloadImage(source, `${selectedPath.split("/").at(-1)?.replace(/\.md$/i, "") ?? "article"}-image-${index + 1}`).then(
-          () => setMessage(`画像${index + 1}をダウンロードしました。`),
-          (downloadError) => setMessage(toError(downloadError, "画像のダウンロードに失敗しました。").message),
-        ).finally(() => {
-          downloadButton.disabled = false;
-          downloadButton.textContent = `画像${index + 1}をダウンロード`;
-        });
-      };
-      downloadButton.addEventListener("click", handleDownloadClick);
-      actions.append(copyButton, downloadButton);
-      image.insertAdjacentElement("afterend", actions);
-      cleanups.push(() => {
-        copyButton.removeEventListener("click", handleCopyClick);
-        downloadButton.removeEventListener("click", handleDownloadClick);
-        actions.remove();
-      });
-    });
-    return () => cleanups.forEach((cleanup) => cleanup());
-  }, [article]);
+  const handleImageAction = (event: ReactMouseEvent<HTMLElement>) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-image-action]");
+    if (!button || !article) return;
+    event.preventDefault();
+    const imageIndex = Number(button.dataset.imageIndex);
+    const image = Array.from(event.currentTarget.querySelectorAll<HTMLImageElement>("[data-copyable-image]"))[imageIndex];
+    const source = image?.currentSrc || image?.src;
+    if (!source) return;
+    const action = button.dataset.imageAction;
+    const label = `画像${imageIndex + 1}`;
+    button.disabled = true;
+    button.textContent = action === "download" ? "ダウンロード中…" : "画像をコピー中…";
+    const operation = action === "download"
+      ? downloadImage(source, `${selectedPath.split("/").at(-1)?.replace(/\.md$/i, "") ?? "article"}-image-${imageIndex + 1}`)
+      : copyImageToClipboard(source);
+    void operation.then(
+      () => setMessage(action === "download" ? `${label}をダウンロードしました。` : `${label}をコピーしました。note側で貼り付けてください。`),
+      (actionError) => setMessage(toError(actionError, action === "download" ? "画像のダウンロードに失敗しました。" : "画像のコピーに失敗しました。").message),
+    );
+  };
 
   const reloadArticle = () => {
     setOperationError(null);
@@ -1119,7 +1085,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             <button className="primary-button" type="button" disabled={saving || !isHttpUrl(publishedUrl)} onClick={() => void savePublished()}>{saving ? "保存中…" : "公開済みにする"}</button>
           </Accordion>
 
-          <article ref={articlePreviewRef} className="markdown-preview" dangerouslySetInnerHTML={{ __html: article.renderedHtml }} />
+          <article className="markdown-preview" onClick={handleImageAction} dangerouslySetInnerHTML={{ __html: withImageCopyActions(article.renderedHtml) }} />
         </>
       )}
     </main>
@@ -1175,6 +1141,17 @@ async function downloadImage(source: string, filename: string): Promise<void> {
   link.download = `${filename}.${extension}`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function withImageCopyActions(html: string): string {
+  let imageIndex = 0;
+  return html.replace(/<img\b[^>]*>/gi, (imageTag) => {
+    if (!/\bsrc=["']data:image\//i.test(imageTag)) return imageTag;
+    const indexedImage = imageTag.replace(/<img\b/i, `<img data-copyable-image data-image-index="${imageIndex}"`);
+    const actions = `<span class="image-copy-actions"><button type="button" class="image-copy-button" data-image-action="copy" data-image-index="${imageIndex}">画像${imageIndex + 1}をコピー</button><button type="button" class="image-download-button" data-image-action="download" data-image-index="${imageIndex}">画像${imageIndex + 1}をダウンロード</button></span>`;
+    imageIndex += 1;
+    return `${indexedImage}${actions}`;
+  });
 }
 
 function copyRichHtmlToClipboard(html: string, plainText: string): boolean {
