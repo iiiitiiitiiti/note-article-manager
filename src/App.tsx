@@ -1078,14 +1078,15 @@ function writeNoteClipboard(article: ArticleContent): Promise<void> {
   if (expectedImageCount > embeddedImageCount) {
     return Promise.reject(new Error("画像を取得できていないため、リッチコピーを作成できません。"));
   }
-  if (copyRichHtmlToClipboard(article.noteHtml, article.body)) {
-    return Promise.resolve();
-  }
   if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
     try {
-      const item = new ClipboardItem({
+      const clipboardData: Record<string, Blob> = {
         "text/html": new Blob([noteClipboardDocument(article.noteHtml)], { type: "text/html" }),
-      });
+        "text/plain": new Blob([article.body], { type: "text/plain" }),
+      };
+      const imageBlob = desktopClipboardImage(article.noteHtml);
+      if (imageBlob) clipboardData["image/png"] = imageBlob;
+      const item = new ClipboardItem(clipboardData);
       return navigator.clipboard.write([item]).catch((error) => {
         if (copyRichHtmlToClipboard(article.noteHtml, article.body)) return;
         throw error;
@@ -1098,6 +1099,21 @@ function writeNoteClipboard(article: ArticleContent): Promise<void> {
     return Promise.resolve();
   }
   return Promise.reject(new Error("この端末ではリッチコピーに対応していません。"));
+}
+
+function desktopClipboardImage(html: string): Blob | null {
+  if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) return null;
+  const match = html.match(/<img\b[^>]*\bsrc=["'](data:image\/png;base64,[^"']+)["']/i);
+  if (!match?.[1]) return null;
+  const [, encoded] = match[1].split(",", 2);
+  if (!encoded) return null;
+  try {
+    const binary = atob(encoded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return new Blob([bytes], { type: "image/png" });
+  } catch {
+    return null;
+  }
 }
 
 function copyRichHtmlToClipboard(html: string, plainText: string): boolean {
