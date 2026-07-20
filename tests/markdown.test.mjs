@@ -8,7 +8,7 @@ test("note body removes front matter and the article title", () => {
   assert.equal(bodyForNote(markdown), "本文");
 });
 
-test("note body replaces Markdown images with manual upload placeholders", () => {
+test("note body uses placeholders when an image cannot be embedded", () => {
   const markdown = "# Title\n\n本文\n\n![見出し画像](images/cover.png)\n\n![](images/empty.png)";
 
   assert.equal(bodyForNote(markdown), "本文\n\n【画像：見出し画像】\n\n【画像：画像】");
@@ -41,14 +41,12 @@ test("unsupported note elements include line and target information", () => {
   const details = getNoteWarningDetails(markdown);
   assert.deepEqual(details.map((warning) => [warning.kind, warning.line]), [
     ["table", 3],
-    ["image", 7],
     ["html", 9],
   ]);
   assert.match(details[0].action, /手動対応/);
-  assert.match(details[1].target, /photo\.png/);
-  assert.equal(getNoteWarnings(markdown).length, 3);
+  assert.equal(details.some((warning) => warning.kind === "image"), false);
+  assert.equal(getNoteWarnings(markdown).length, 2);
   assert.equal(hasBlockingNoteWarnings(details), true);
-  assert.equal(hasBlockingNoteWarnings(details.filter((warning) => warning.kind === "image")), false);
 });
 
 test("ordinary note-compatible Markdown has no blocking warnings", () => {

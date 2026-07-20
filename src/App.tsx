@@ -819,7 +819,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
     setMessage("");
     setOperationError(null);
     setManualCopy(null);
-    if (!navigator.clipboard?.writeText) {
+    if (label !== "note用本文" && !navigator.clipboard?.writeText) {
       setManualCopy({ label, text, openNoteAfterCopy });
       return;
     }
@@ -1068,14 +1068,52 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
 }
 
 function writeNoteClipboard(article: ArticleContent, text: string): Promise<void> {
-  if (!article.noteHtml.includes("<img ") || !navigator.clipboard.write || typeof ClipboardItem === "undefined") {
+  if (copyRichHtmlToClipboard(article.noteHtml)) {
+    return Promise.resolve();
+  }
+  if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+    const item = new ClipboardItem({
+      "text/plain": new Blob([text], { type: "text/plain" }),
+      "text/html": new Blob([article.noteHtml], { type: "text/html" }),
+    });
+    return navigator.clipboard.write([item]);
+  }
+  if (navigator.clipboard?.writeText) {
     return navigator.clipboard.writeText(text);
   }
-  const item = new ClipboardItem({
-    "text/plain": new Blob([text], { type: "text/plain" }),
-    "text/html": new Blob([article.noteHtml], { type: "text/html" }),
-  });
-  return navigator.clipboard.write([item]);
+  return Promise.reject(new Error("リッチクリップボードに対応していません。"));
+}
+
+function copyRichHtmlToClipboard(html: string): boolean {
+  if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function" || !html.trim()) {
+    return false;
+  }
+
+  const container = document.createElement("div");
+  container.contentEditable = "true";
+  container.setAttribute("aria-hidden", "true");
+  container.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;";
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  const selection = window.getSelection();
+  if (!selection) {
+    container.remove();
+    return false;
+  }
+
+  const range = document.createRange();
+  range.selectNodeContents(container);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    selection.removeAllRanges();
+    container.remove();
+  }
 }
 
 function Accordion({ className, label, children, open: controlledOpen, onOpenChange }: { className: string; label: string; children: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) {

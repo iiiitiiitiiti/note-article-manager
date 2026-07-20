@@ -84,16 +84,6 @@ export function getNoteWarningDetails(markdown: string): NoteWarning[] {
       );
     }
   }
-  for (const match of content.matchAll(MARKDOWN_IMAGE_PATTERN)) {
-    const line = lineNumberAt(content, match.index ?? 0);
-    addWarning(
-      "image",
-      line,
-      `画像「${match[2]}」（${line}行目）`,
-      "Markdown の画像は note へ自動アップロードされないため、画像用プレースホルダーへ変換します。",
-      "手動対応: note側でこの位置に画像をアップロードしてください。",
-    );
-  }
   for (const match of content.matchAll(/<\/?(?!(?:https?:\/\/|mailto:))[A-Za-z][^>]*>/gi)) {
     const line = lineNumberAt(content, match.index ?? 0);
     if (htmlWarningLines.has(line)) continue;
