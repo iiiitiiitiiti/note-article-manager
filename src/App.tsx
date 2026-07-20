@@ -3,12 +3,12 @@ import { GithubClient, type ConnectionTestResult } from "./github";
 import { GithubApiError } from "./github-errors";
 import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKey, isNotificationConfigured, isPushSupported, requiresStandalonePwa, subscribeToPublicationNotifications, unsubscribeFromPublicationNotifications } from "./notifications";
 import { buildPublicationSchedule, DEFAULT_SCHEDULE, getPublicationScheduleFrequency, hasMissingPublicationOrders, WEEKDAY_OPTIONS } from "./schedule";
-import { buildImageAssetPath, getImageTaskState, hasUnpreparedImageTasks, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
+import { buildImageAssetPath, getImageTaskState, hasUnpreparedImageTasks, MAX_IMAGE_BYTES, resolveRelativeImagePath, summarizeImageTasks } from "./image-plan";
 import { hasBlockingNoteWarnings, noteClipboardDocument, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadNoteComposerArticle, loadPublicationSchedule, loadToken, saveArticleReturnPath, saveNoteComposerArticle, savePublicationSchedule, saveToken } from "./storage";
 
 const NOTE_APP_URL = "https://note.com/intent/post";
-import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, NoteTransferMode, PublicationScheduleConfig, PublicationScheduleFrequency, PushSubscriptionData, RepositorySnapshot } from "./types";
+import type { ArticleContent, ArticleHealthReport, ArticlePath, ArticleStatus, ImageDecision, ImageInventory, ImageProgressSummary, ImageRegistrationStage, ImageStatusDocument, ImageTaskState, NoteTransferMode, PublicationScheduleConfig, PublicationScheduleFrequency, PushSubscriptionData, RepositorySnapshot } from "./types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   design: "design",
@@ -39,6 +39,13 @@ type ArticleOperationError = {
   retry: () => void;
   reloadArticle?: () => void;
   checkOrphans?: () => void;
+};
+
+type ImagePreparationTask = {
+  taskId: string;
+  description: string;
+  optional: boolean;
+  state: ImageTaskState;
 };
 
 type SyncPhase = "idle" | "checking" | "updated" | "unchanged" | "error";
@@ -789,6 +796,8 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
     setNoteComposerOpened(loadNoteComposerArticle() === selectedPath);
   }, [selectedPath]);
 
+  const imageTasks = article ? buildImagePreparationTasks(article, imageStatus) : [];
+
   const handleImageAction = (event: ReactMouseEvent<HTMLElement>) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-image-action]");
     if (!button || !article) return;
@@ -888,8 +897,8 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   };
 
   const uploadImage = async (taskId: string, file: File) => {
-    const placeholder = article?.imagePlaceholders.find((item) => item.id === taskId);
-    if (!placeholder) return;
+    const imageTask = imageTasks.find((item) => item.taskId === taskId);
+    if (!imageTask) return;
     if (file.size === 0 || file.size > MAX_IMAGE_BYTES) {
       setMessage("画像は1バイト以上、5MB以下にしてください。");
       return;
@@ -912,7 +921,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
         updatedAt: new Date().toISOString(),
       });
       onImageStatusSaved(assetUploaded);
-      await client.updateArticleWithImage(selectedPath, taskId, imageMarkdownFor(placeholder.description, assetPath));
+      await client.updateArticleWithImage(selectedPath, taskId, imageMarkdownFor(imageTask.description, assetPath));
       const articleUpdated = await client.updateImageTaskState(selectedPath, taskId, {
         assetPath,
         registrationStage: "article-updated",
@@ -940,16 +949,16 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   };
 
   const resumeImageRegistration = async (taskId: string) => {
-    const placeholder = article?.imagePlaceholders.find((item) => item.id === taskId);
+    const imageTask = imageTasks.find((item) => item.taskId === taskId);
     const currentState = getImageTaskState(imageStatus, selectedPath, taskId);
-    if (!placeholder || !currentState.assetPath || !["asset-uploaded", "article-updated"].includes(currentState.registrationStage)) return;
+    if (!imageTask || !currentState.assetPath || !["asset-uploaded", "article-updated"].includes(currentState.registrationStage)) return;
     setImageBusy(taskId);
     setMessage("");
     setOperationError(null);
     try {
       let stage = currentState.registrationStage;
       if (stage === "asset-uploaded") {
-        await client.updateArticleWithImage(selectedPath, taskId, imageMarkdownFor(placeholder.description, currentState.assetPath));
+        await client.updateArticleWithImage(selectedPath, taskId, imageMarkdownFor(imageTask.description, currentState.assetPath));
         const articleUpdated = await client.updateImageTaskState(selectedPath, taskId, {
           assetPath: currentState.assetPath,
           registrationStage: "article-updated",
@@ -1041,39 +1050,39 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             {article.warningDetails.length > 0 && <ul className="warning-list">{article.warningDetails.map((warning) => <li key={`${warning.kind}-${warning.line}-${warning.target}`}><strong>{warning.message}</strong> <span>{warning.target}</span><br /><span>{warning.action}</span></li>)}</ul>}
           </section>
 
-          {article.imagePlaceholders.length > 0 && <Accordion className="image-plan-card" label="画像の準備">
+          {imageTasks.length > 0 && <Accordion className="image-plan-card" label="画像の準備">
                 <p className="image-plan-intro">画像ごとに、AIで生成するか、自分で用意するか、不要かを管理できます。</p>
-                {article.imagePlaceholders.map((placeholder, index) => {
-                  const state = getImageTaskState(imageStatus, selectedPath, placeholder.id);
-                  const busy = imageBusy === placeholder.id;
+                {imageTasks.map((imageTask, index) => {
+                  const state = imageTask.state;
+                  const busy = imageBusy === imageTask.taskId;
                   return (
-                    <div className="image-task" key={placeholder.id}>
+                    <div className="image-task" key={imageTask.taskId}>
                       <div className="image-task-heading">
-                        <strong>画像 {index + 1}{placeholder.optional ? "（任意）" : ""}</strong>
+                        <strong>画像 {index + 1}{imageTask.optional ? "（任意）" : ""}</strong>
                         <div className="image-task-badges">
                           <span className={`image-registration-stage image-stage-${state.registrationStage}`}>{IMAGE_STAGE_LABELS[state.registrationStage]}</span>
                           <span className={`image-decision image-decision-${state.decision}`}>{IMAGE_DECISION_LABELS[state.decision]}</span>
                         </div>
                       </div>
-                      <p>{placeholder.description}</p>
+                      <p>{imageTask.description}</p>
                       <div className="image-decision-actions" role="group" aria-label={`画像${index + 1}の判断`}>
-                        {IMAGE_DECISIONS.map((item) => <button className={item.value === state.decision ? "image-decision-button active" : "image-decision-button"} type="button" key={item.value} disabled={busy} onClick={() => void saveImageDecision(placeholder.id, item.value)}>{item.label}</button>)}
+                        {IMAGE_DECISIONS.map((item) => <button className={item.value === state.decision ? "image-decision-button active" : "image-decision-button"} type="button" key={item.value} disabled={busy} onClick={() => void saveImageDecision(imageTask.taskId, item.value)}>{item.label}</button>)}
                       </div>
-                      {state.decision === "generate" && <button className="secondary-button image-prompt-button" type="button" disabled={busy} onClick={() => copy("画像生成用プロンプト", buildImagePrompt(article.title, placeholder.description))}>生成用プロンプトをコピー</button>}
+                      {state.decision === "generate" && <button className="secondary-button image-prompt-button" type="button" disabled={busy} onClick={() => copy("画像生成用プロンプト", buildImagePrompt(article.title, imageTask.description))}>生成用プロンプトをコピー</button>}
                       {state.assetPath && <p className="image-asset-path">登録済み: {state.assetPath}</p>}
                       {["asset-uploaded", "article-updated"].includes(state.registrationStage) && state.assetPath && (
                         <div className="image-recovery">
                           <p><strong>途中状態：</strong>{IMAGE_STAGE_LABELS[state.registrationStage]}。まだ完了していません。</p>
                           <div className="image-recovery-actions">
-                            <button className="secondary-button" type="button" disabled={busy} onClick={() => void resumeImageRegistration(placeholder.id)}>続きを再試行</button>
+                            <button className="secondary-button" type="button" disabled={busy} onClick={() => void resumeImageRegistration(imageTask.taskId)}>続きを再試行</button>
                             <button className="secondary-button" type="button" disabled={busy} onClick={reloadArticle}>記事を再読み込み</button>
-                            <button className="secondary-button" type="button" disabled={orphanCheckBusy === placeholder.id} onClick={() => void checkOrphanImages(placeholder.id)}>{orphanCheckBusy === placeholder.id ? "確認中…" : "孤児画像を確認"}</button>
+                            <button className="secondary-button" type="button" disabled={orphanCheckBusy === imageTask.taskId} onClick={() => void checkOrphanImages(imageTask.taskId)}>{orphanCheckBusy === imageTask.taskId ? "確認中…" : "孤児画像を確認"}</button>
                           </div>
-                          {orphanImages[placeholder.id] && (orphanImages[placeholder.id].length > 0 ? <ul className="orphan-image-list">{orphanImages[placeholder.id].map((orphanPath) => <li key={orphanPath}><code>{orphanPath}</code></li>)}</ul> : <p className="orphan-image-empty">孤児画像の候補はありません。</p>)}
+                          {orphanImages[imageTask.taskId] && (orphanImages[imageTask.taskId].length > 0 ? <ul className="orphan-image-list">{orphanImages[imageTask.taskId].map((orphanPath) => <li key={orphanPath}><code>{orphanPath}</code></li>)}</ul> : <p className="orphan-image-empty">孤児画像の候補はありません。</p>)}
                         </div>
                       )}
-                      <label className="secondary-button image-upload-button" htmlFor={`${placeholder.id}-upload`}>{busy ? "登録中…" : "画像を登録"}</label>
-                      <input className="visually-hidden" id={`${placeholder.id}-upload`} type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void uploadImage(placeholder.id, file); }} />
+                      <label className="secondary-button image-upload-button" htmlFor={`${imageTask.taskId}-upload`}>{busy ? "登録中…" : state.assetPath ? "画像を変更" : "画像を登録"}</label>
+                      <input className="visually-hidden" id={`${imageTask.taskId}-upload`} type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void uploadImage(imageTask.taskId, file); }} />
                     </div>
                   );
                 })}
@@ -1090,6 +1099,34 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
       )}
     </main>
   );
+}
+
+function buildImagePreparationTasks(article: ArticleContent, imageStatus: ImageStatusDocument): ImagePreparationTask[] {
+  const tasks = article.imagePlaceholders.map((placeholder) => ({
+    taskId: placeholder.id,
+    description: placeholder.description,
+    optional: placeholder.optional,
+    state: getImageTaskState(imageStatus, article.path, placeholder.id),
+  }));
+  const knownTaskIds = new Set(tasks.map((task) => task.taskId));
+  for (const [taskId, state] of Object.entries(imageStatus.articles[article.path]?.tasks ?? {})) {
+    if (knownTaskIds.has(taskId) || !state.assetPath) continue;
+    tasks.push({
+      taskId,
+      description: findImageDescription(article, state.assetPath) ?? `登録済み画像（${state.assetPath}）`,
+      optional: false,
+      state,
+    });
+  }
+  return tasks;
+}
+
+function findImageDescription(article: ArticleContent, assetPath: string): string | null {
+  const imagePattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g;
+  for (const match of article.sourceMarkdown.matchAll(imagePattern)) {
+    if (resolveRelativeImagePath(article.path, match[2]) === assetPath) return match[1].trim() || null;
+  }
+  return null;
 }
 
 function writeNoteClipboard(article: ArticleContent): Promise<void> {
