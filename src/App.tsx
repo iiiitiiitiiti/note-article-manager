@@ -980,6 +980,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   const blockingNoteWarnings = article ? hasBlockingNoteWarnings(article.warningDetails) : false;
   const expectedImageCount = article?.localImagePaths.length ?? 0;
   const embeddedImageCount = article ? (article.noteHtml.match(/<img\b/gi) ?? []).length : 0;
+  const runtimeWarnings = article?.warnings.slice(article.warningDetails.length) ?? [];
 
   return (
     <main className="app-shell">
@@ -1016,6 +1017,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             {message && <p className="inline-message" role="status">{message}</p>}
             {noteComposerOpened && <p className="inline-message" role="status">noteの執筆画面を開いたため、以降のコピーでは新しい執筆画面を開きません。noteアプリに戻って貼り付けてください。</p>}
             {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} onOpenNote={manualCopy.openNoteAfterCopy ? openNote : undefined} />}
+            {runtimeWarnings.length > 0 && <ul className="warning-list">{runtimeWarnings.map((warning) => <li key={warning}><strong>{warning}</strong></li>)}</ul>}
             {article.warningDetails.length > 0 && <ul className="warning-list">{article.warningDetails.map((warning) => <li key={`${warning.kind}-${warning.line}-${warning.target}`}><strong>{warning.message}</strong> <span>{warning.target}</span><br /><span>{warning.action}</span></li>)}</ul>}
           </section>
 
