@@ -191,7 +191,8 @@ input:focus, textarea:focus, button:focus-visible, a:focus-visible { outline: 3p
 .markdown-preview h2 { margin: 1.8em 0 .6em; padding-bottom: 5px; border-bottom: 1px solid #d8d5cc; font-size: 1.35rem; }
 .markdown-preview h3 { margin: 1.5em 0 .5em; font-size: 1.1rem; }
 .markdown-preview p { margin-bottom: 1em; }
-.markdown-preview .image-copy-button { display: block; margin: 8px 0 20px; border: 1px solid #bfc6be; border-radius: 9px; padding: 7px 11px; background: #fffdf8; color: #173f35; font-size: .82rem; font-weight: 700; }
+.markdown-preview .image-copy-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 20px; }
+.markdown-preview .image-copy-button, .markdown-preview .image-download-button { border: 1px solid #bfc6be; border-radius: 9px; padding: 7px 11px; background: #fffdf8; color: #173f35; font-size: .82rem; font-weight: 700; }
 .markdown-preview blockquote { max-width: 100%; margin: 1em 0; border-left: 4px solid #b7c8bb; padding: 8px 14px; background: #eef3ed; color: #4e6054; overflow-wrap: anywhere; }
 .markdown-preview pre { max-width: 100%; overflow: auto; border-radius: 9px; padding: 14px; background: #1c2d28; color: #edf5ec; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .markdown-preview code { background: #e9e5db; overflow-wrap: anywhere; word-break: break-word; }
