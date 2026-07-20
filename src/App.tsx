@@ -150,6 +150,7 @@ export default function App() {
 
   const openArticle = useCallback(async (path: string) => {
     if (!client) return;
+    saveArticleReturnPath(path);
     setReturnScrollY(window.scrollY);
     setSelectedPath(path);
     setArticle(null);
@@ -207,7 +208,9 @@ export default function App() {
   const handleTokenSave = (nextToken: string, persist: boolean) => {
     if (persist) saveToken(nextToken);
     else clearToken();
+    clearArticleReturnPath();
     setToken(nextToken.trim());
+    setReturnPath("");
     setShowSettings(false);
     setSnapshot(null);
     setPendingSnapshot(null);
@@ -223,6 +226,7 @@ export default function App() {
     clearToken();
     clearArticleReturnPath();
     setToken("");
+    setReturnPath("");
     setShowSettings(true);
     setSnapshot(null);
     setPendingSnapshot(null);
@@ -236,7 +240,9 @@ export default function App() {
 
   const openSettings = () => {
     applyPendingSnapshot();
+    clearArticleReturnPath();
     setShowSettings(true);
+    setReturnPath("");
     setSelectedPath(null);
     setArticle(null);
     setReturnScrollY(null);
@@ -264,7 +270,7 @@ export default function App() {
         currentStatus={snapshot?.articles.find((item) => item.path === selectedPath)}
         client={client}
         imageStatus={snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }}
-        onBack={() => { applyPendingSnapshot(); clearArticleReturnPath(); setSelectedPath(null); setArticle(null); setError(null); }}
+        onBack={() => { applyPendingSnapshot(); clearArticleReturnPath(); setReturnPath(""); setSelectedPath(null); setArticle(null); setError(null); }}
         onPrepareNoteNavigation={() => saveArticleReturnPath(selectedPath)}
         onImageStatusSaved={(imageStatus) => {
           setSnapshot((current) => current ? { ...current, imageStatus } : current);
