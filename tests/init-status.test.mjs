@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { buildStatusDocument, extractArticleTitle, extractFilenameOrder, parseDesignQueue, parseDisneyReviewStatuses } from "../scripts/init-status.mjs";
 import { buildImageStatusDocument, parseImagePlaceholders } from "../scripts/init-image-status.mjs";
+import { syncWebReviewImages } from "../scripts/sync-web-review-images.mjs";
 
 test("parseDesignQueue validates order and filename numbers", () => {
   const queue = parseDesignQueue([
@@ -107,4 +108,47 @@ test("image placeholders become stable tasks and preserve decisions", () => {
       },
     },
   });
+});
+
+test("web-review images are linked by numbered filenames", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "note-article-manager-web-review-"));
+  mkdirSync(join(repoRoot, "web-review", "images", "sample-review"), { recursive: true });
+  writeFileSync(join(repoRoot, "web-review/sample-review.md"), "# Sample\n\n【画像】ファーストビュー\n\n本文\n\n【画像】料金セクション\n");
+  writeFileSync(join(repoRoot, "web-review/images/sample-review/01-first.png"), "image-1");
+  writeFileSync(join(repoRoot, "web-review/images/sample-review/02-plan.png"), "image-2");
+  writeFileSync(join(repoRoot, "web-review/images/sample-review/03-extra.png"), "image-3");
+  writeFileSync(join(repoRoot, "image-status.json"), JSON.stringify({ schemaVersion: 1, articles: {} }));
+
+  const result = syncWebReviewImages(repoRoot, "2026-07-20T10:00:00.000Z");
+  assert.deepEqual(result.changedArticles, ["web-review/sample-review.md"]);
+  assert.equal(readFileSync(join(repoRoot, "web-review/sample-review.md"), "utf8"), "# Sample\n\n![ファーストビュー](images/sample-review/01-first.png)\n\n本文\n\n![料金セクション](images/sample-review/02-plan.png)\n");
+  const imageStatus = JSON.parse(readFileSync(join(repoRoot, "image-status.json"), "utf8"));
+  assert.deepEqual(Object.values(imageStatus.articles["web-review/sample-review.md"].tasks).map((task) => ({
+    decision: task.decision,
+    assetPath: task.assetPath,
+    registrationStage: task.registrationStage,
+  })), [
+    { decision: "provide", assetPath: "web-review/images/sample-review/01-first.png", registrationStage: "completed" },
+    { decision: "provide", assetPath: "web-review/images/sample-review/02-plan.png", registrationStage: "completed" },
+  ]);
+});
+
+test("web-review image sync skips incomplete image sequences and intentional skips", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "note-article-manager-web-review-skip-"));
+  mkdirSync(join(repoRoot, "web-review", "images", "incomplete"), { recursive: true });
+  mkdirSync(join(repoRoot, "web-review", "images", "intentional-skip"), { recursive: true });
+  writeFileSync(join(repoRoot, "web-review/incomplete.md"), "# Incomplete\n\n【画像】一枚目\n\n【画像】二枚目\n");
+  writeFileSync(join(repoRoot, "web-review/images/incomplete/01-only.png"), "image");
+  writeFileSync(join(repoRoot, "web-review/intentional-skip.md"), "# Intentional skip\n\n【画像】不要な画像\n");
+  writeFileSync(join(repoRoot, "web-review/images/intentional-skip/01-image.png"), "image");
+  const placeholder = parseImagePlaceholders(readFileSync(join(repoRoot, "web-review/intentional-skip.md"), "utf8"))[0];
+  writeFileSync(join(repoRoot, "image-status.json"), JSON.stringify({ schemaVersion: 1, articles: {
+    "web-review/intentional-skip.md": { tasks: { [placeholder.id]: { decision: "skip", assetPath: null, updatedAt: null } } },
+  } }));
+
+  const result = syncWebReviewImages(repoRoot, "2026-07-20T10:00:00.000Z");
+  assert.deepEqual(result.changedArticles, []);
+  assert.equal(result.warnings.length, 1);
+  assert.match(readFileSync(join(repoRoot, "web-review/incomplete.md"), "utf8"), /【画像】一枚目/);
+  assert.match(readFileSync(join(repoRoot, "web-review/intentional-skip.md"), "utf8"), /【画像】不要な画像/);
 });

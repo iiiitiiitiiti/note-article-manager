@@ -19,7 +19,8 @@ export function parseImagePlaceholders(markdown) {
     const description = trailingDescription || markerDescription || inside;
     const occurrence = occurrences.get(description) ?? 0;
     occurrences.set(description, occurrence + 1);
-    placeholders.push({ id: createImageTaskId(description, occurrence), description });
+    const start = match.index ?? 0;
+    placeholders.push({ id: createImageTaskId(description, occurrence), description, start, end: start + match[0].length });
   }
   return placeholders;
 }
