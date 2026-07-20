@@ -81,11 +81,16 @@ export default function App() {
   const syncInFlightRef = useRef(false);
   const lastCheckedAtRef = useRef(0);
   const selectedPathRef = useRef<string | null>(null);
+  const snapshotRef = useRef<RepositorySnapshot | null>(null);
   const client = useMemo(() => (token ? new GithubClient(token) : null), [token]);
 
   useEffect(() => {
     selectedPathRef.current = selectedPath;
   }, [selectedPath]);
+
+  useEffect(() => {
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
 
   const sync = useCallback(async (reason: "initial" | "manual" | "automatic") => {
     if (!client) return;
@@ -99,7 +104,7 @@ export default function App() {
       const result = await client.checkForUpdates();
       const checkedAt = Date.now();
       lastCheckedAtRef.current = checkedAt;
-      if (result.changed && selectedPathRef.current) {
+      if (result.changed && selectedPathRef.current && snapshotRef.current) {
         setPendingSnapshot(result.snapshot);
       } else if (result.changed) {
         setSnapshot(result.snapshot);
