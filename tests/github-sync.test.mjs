@@ -152,6 +152,19 @@ test("image upload includes the existing SHA and retries a 409 conflict", async 
   }
 });
 
+test("image preview keeps binary content as base64 instead of decoding it as UTF-8", async () => {
+  const originalFetch = globalThis.fetch;
+  const binaryImage = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 255, 0]);
+  const encodedImage = Buffer.from(binaryImage).toString("base64");
+  globalThis.fetch = async () => jsonResponse(200, { content: encodedImage, encoding: "base64", sha: "image-sha" });
+
+  try {
+    assert.equal(await new GithubClient("test-token").getImageDataUrl("design/images/example.png"), `data:image/png;base64,${encodedImage}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("image inventory distinguishes unreferenced files, broken links, and status-only paths", async () => {
   const originalFetch = globalThis.fetch;
   const article = "# One\n\n![broken](images/missing.png)\n";

@@ -109,6 +109,18 @@ export class GithubClient {
   }
 
   public async getArticleFile(path: string, operation = "記事本文"): Promise<{ content: string; sha: string }> {
+    const file = await this.getContentsFile(path, operation);
+    return { content: decodeBase64Utf8(file.content), sha: file.sha };
+  }
+
+  public async getImageDataUrl(path: string): Promise<string> {
+    const file = await this.getContentsFile(path, `画像「${path}」`);
+    const normalized = file.content.replace(/\s/g, "");
+    if (normalized.length * 0.75 > MAX_IMAGE_BYTES) throw new Error(`画像が大きすぎるためプレビューできません: ${path}`);
+    return `data:${mimeTypeForPath(path)};base64,${normalized}`;
+  }
+
+  private async getContentsFile(path: string, operation: string): Promise<{ content: string; sha: string }> {
     const response = await this.request<ContentsResponse>(
       `/repos/${OWNER}/${REPOSITORY}/contents/${encodePath(path)}?ref=${BRANCH}`,
       {},
@@ -119,14 +131,7 @@ export class GithubClient {
     if (response.status !== 200 || !response.data.content || response.data.encoding !== "base64") {
       throw new Error(`${operation}を取得できませんでした: ${path}`);
     }
-    return { content: decodeBase64Utf8(response.data.content), sha: response.data.sha };
-  }
-
-  public async getImageDataUrl(path: string): Promise<string> {
-    const file = await this.getArticleFile(path, `画像「${path}」`);
-    const normalized = file.content.replace(/\s/g, "");
-    if (normalized.length * 0.75 > MAX_IMAGE_BYTES) throw new Error(`画像が大きすぎるためプレビューできません: ${path}`);
-    return `data:${mimeTypeForPath(path)};base64,${normalized}`;
+    return { content: response.data.content, sha: response.data.sha };
   }
 
   public async getArticleImageAssets(articlePath: string): Promise<string[]> {
