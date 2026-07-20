@@ -978,6 +978,8 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
   };
 
   const blockingNoteWarnings = article ? hasBlockingNoteWarnings(article.warningDetails) : false;
+  const expectedImageCount = article?.localImagePaths.length ?? 0;
+  const embeddedImageCount = article ? (article.noteHtml.match(/<img\b/gi) ?? []).length : 0;
 
   return (
     <main className="app-shell">
@@ -1010,6 +1012,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
               }}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</a>}
             </div>
             {transferMode === "note" && blockingNoteWarnings && <p className="inline-message transfer-blocked" role="status">note用本文は表やHTMLなど要手動対応の要素があるためコピーできません。原文Markdownをコピーするか、下の対象を確認してください。</p>}
+            {transferMode === "note" && expectedImageCount > embeddedImageCount && <p className="inline-message transfer-blocked" role="status">画像を取得できていないため、現在のnote用本文には画像の代わりにプレースホルダーが入っています。画像取得に成功してからコピーしてください。</p>}
             {message && <p className="inline-message" role="status">{message}</p>}
             {noteComposerOpened && <p className="inline-message" role="status">noteの執筆画面を開いたため、以降のコピーでは新しい執筆画面を開きません。noteアプリに戻って貼り付けてください。</p>}
             {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} onOpenNote={manualCopy.openNoteAfterCopy ? openNote : undefined} />}
@@ -1068,34 +1071,43 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
 }
 
 function writeNoteClipboard(article: ArticleContent): Promise<void> {
+  const expectedImageCount = article.localImagePaths.length;
+  const embeddedImageCount = (article.noteHtml.match(/<img\b/gi) ?? []).length;
+  if (expectedImageCount > embeddedImageCount) {
+    return Promise.reject(new Error("画像を取得できていないため、リッチコピーを作成できません。"));
+  }
+  if (copyRichHtmlToClipboard(article.noteHtml, article.body)) {
+    return Promise.resolve();
+  }
   if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
     try {
       const item = new ClipboardItem({
         "text/html": new Blob([noteClipboardDocument(article.noteHtml)], { type: "text/html" }),
       });
       return navigator.clipboard.write([item]).catch((error) => {
-        if (copyRichHtmlToClipboard(article.noteHtml)) return;
+        if (copyRichHtmlToClipboard(article.noteHtml, article.body)) return;
         throw error;
       });
     } catch {
       // Fall through to the browser-native selection copy.
     }
   }
-  if (copyRichHtmlToClipboard(article.noteHtml)) {
+  if (copyRichHtmlToClipboard(article.noteHtml, article.body)) {
     return Promise.resolve();
   }
   return Promise.reject(new Error("この端末ではリッチコピーに対応していません。"));
 }
 
-function copyRichHtmlToClipboard(html: string): boolean {
+function copyRichHtmlToClipboard(html: string, plainText: string): boolean {
   if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function" || !html.trim()) {
     return false;
   }
 
   const container = document.createElement("div");
   container.contentEditable = "true";
+  container.tabIndex = -1;
   container.setAttribute("aria-hidden", "true");
-  container.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;";
+  container.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;overflow:hidden;pointer-events:none;";
   container.innerHTML = html;
   document.body.appendChild(container);
 
@@ -1107,6 +1119,14 @@ function copyRichHtmlToClipboard(html: string): boolean {
 
   const range = document.createRange();
   range.selectNodeContents(container);
+  const handleCopy = (event: ClipboardEvent) => {
+    if (!event.clipboardData) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/html", noteClipboardDocument(html));
+    event.clipboardData.setData("text/plain", plainText);
+  };
+  container.addEventListener("copy", handleCopy);
+  container.focus({ preventScroll: true });
   selection.removeAllRanges();
   selection.addRange(range);
   try {
@@ -1114,6 +1134,7 @@ function copyRichHtmlToClipboard(html: string): boolean {
   } catch {
     return false;
   } finally {
+    container.removeEventListener("copy", handleCopy);
     selection.removeAllRanges();
     container.remove();
   }
