@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { filterArticleImageAssets, getImageTaskState, parseImagePlaceholders, replaceImagePlaceholder, summarizeImageTasks, validateImageStatusDocument, withImageTaskState } from "../src/image-plan.ts";
+import { filterArticleImageAssets, getImageTaskState, hasUnpreparedImageTasks, parseImagePlaceholders, replaceImagePlaceholder, summarizeImageTasks, validateImageStatusDocument, withImageTaskState } from "../src/image-plan.ts";
 
 const articlePath = "disney/11_disney-omnimover-article.md";
 const taskId = "image-12345678-1";
@@ -72,6 +72,26 @@ test("image task summaries expose all decision counts", () => {
   });
 
   assert.deepEqual(summarizeImageTasks(document, articlePath), { total: 4, pending: 1, generate: 1, provide: 1, skip: 1 });
+});
+
+test("unprepared image tasks include selected decisions until registration completes", () => {
+  const document = validateImageStatusDocument({
+    schemaVersion: 1,
+    articles: {
+      [articlePath]: {
+        tasks: {
+          pending: { decision: "pending", assetPath: null, updatedAt: null },
+          generate: { decision: "generate", assetPath: null, updatedAt: null },
+          provide: { decision: "provide", assetPath: "disney/images/provide.png", registrationStage: "article-updated", updatedAt: null },
+          completed: { decision: "generate", assetPath: "disney/images/completed.png", registrationStage: "completed", updatedAt: null },
+          skip: { decision: "skip", assetPath: null, updatedAt: null },
+        },
+      },
+    },
+  });
+
+  assert.equal(hasUnpreparedImageTasks(document, articlePath), true);
+  assert.equal(hasUnpreparedImageTasks(document, "disney/new-article.md"), false);
 });
 
 test("missing image status entries are treated as articles without image tasks", () => {

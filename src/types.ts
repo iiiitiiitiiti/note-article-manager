@@ -69,6 +69,7 @@ export interface ArticleContent {
   path: string;
   title: string;
   body: string;
+  noteHtml: string;
   sourceMarkdown: string;
   renderedHtml: string;
   warnings: string[];

@@ -108,6 +108,12 @@ export function summarizeImageTasks(document: ImageStatusDocument, articlePath: 
   return summary;
 }
 
+export function hasUnpreparedImageTasks(document: ImageStatusDocument, articlePath: string): boolean {
+  return Object.values(document.articles[articlePath]?.tasks ?? {}).some((task) => (
+    task.decision !== "skip" && (task.assetPath === null || task.registrationStage !== "completed")
+  ));
+}
+
 export function withImageTaskState(
   document: ImageStatusDocument,
   articlePath: string,

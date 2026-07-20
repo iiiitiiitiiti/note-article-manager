@@ -3,8 +3,8 @@ import { GithubClient, type ConnectionTestResult } from "./github";
 import { GithubApiError } from "./github-errors";
 import { DEFAULT_NOTIFICATION_TIME, getCurrentPushSubscription, getVapidPublicKey, isNotificationConfigured, isPushSupported, requiresStandalonePwa, subscribeToPublicationNotifications, unsubscribeFromPublicationNotifications } from "./notifications";
 import { buildPublicationSchedule, DEFAULT_SCHEDULE, getPublicationScheduleFrequency, hasMissingPublicationOrders, WEEKDAY_OPTIONS } from "./schedule";
-import { buildImageAssetPath, getImageTaskState, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
-import { bodyForNote, renderArticle } from "./markdown";
+import { buildImageAssetPath, getImageTaskState, hasUnpreparedImageTasks, MAX_IMAGE_BYTES, summarizeImageTasks } from "./image-plan";
+import { hasBlockingNoteWarnings, renderArticle } from "./markdown";
 import { clearArticleReturnPath, clearToken, loadArticleReturnPath, loadNoteComposerArticle, loadPublicationSchedule, loadToken, saveArticleReturnPath, saveNoteComposerArticle, savePublicationSchedule, saveToken } from "./storage";
 
 const NOTE_APP_URL = "https://note.com/intent/post";
@@ -289,12 +289,12 @@ export default function App() {
 
   const categories = [...new Set(snapshot?.articles.map((item) => item.category) ?? [])];
   const categoryArticles = (snapshot?.articles ?? []).filter((item) => item.category === selectedCategory);
-  const pendingImageArticleCount = categoryArticles.filter((item) => summarizeImageTasks(snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }, item.path).pending > 0).length;
+  const pendingImageArticleCount = categoryArticles.filter((item) => hasUnpreparedImageTasks(snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }, item.path)).length;
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase("ja");
   const visibleArticles = categoryArticles.filter((item) => {
     const matchesStatus = statusFilter === "all" || item.status === statusFilter;
     const matchesQuery = !normalizedQuery || `${item.path} ${articleDisplayName(item)}`.toLocaleLowerCase("ja").includes(normalizedQuery);
-    const matchesImage = !showPendingImagesOnly || summarizeImageTasks(snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }, item.path).pending > 0;
+    const matchesImage = !showPendingImagesOnly || hasUnpreparedImageTasks(snapshot?.imageStatus ?? { schemaVersion: 1, articles: {} }, item.path);
     return matchesStatus && matchesQuery && matchesImage;
   });
 
@@ -498,7 +498,7 @@ function DashboardPanel({ snapshot, schedule, onScheduleChange, client, onOpenAr
     result[article.status] += 1;
     return result;
   }, { queued: 0, review: 0, published: 0, draft: 0, unset: 0 } as Record<ArticleStatus, number>);
-  const pendingImages = snapshot.articles.filter((article) => summarizeImageTasks(snapshot.imageStatus, article.path).pending > 0).length;
+  const pendingImages = snapshot.articles.filter((article) => hasUnpreparedImageTasks(snapshot.imageStatus, article.path)).length;
   const scheduled = buildPublicationSchedule(snapshot.articles, schedule);
   const categories = [...new Set(snapshot.articles.map((article) => article.category))];
   const frequency = getPublicationScheduleFrequency(schedule);
@@ -823,7 +823,8 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
       setManualCopy({ label, text, openNoteAfterCopy });
       return;
     }
-    void navigator.clipboard.writeText(text).then(
+    const write = label === "note用本文" && article ? writeNoteClipboard(article, text) : navigator.clipboard.writeText(text);
+    void write.then(
       () => {
         setMessage(`${label}をコピーしました。`);
       },
@@ -976,6 +977,8 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
     }
   };
 
+  const blockingNoteWarnings = article ? hasBlockingNoteWarnings(article.warningDetails) : false;
+
   return (
     <main className="app-shell">
       <header className="article-header">
@@ -989,7 +992,7 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
       {article && (
         <>
           <section className="article-intro">
-            <div className="article-intro-line"><StatusBadge status={currentStatus?.status ?? "unset"} />{article.warnings.length > 0 && <span className="warning-badge">note 非対応要素あり</span>}</div>
+            <div className="article-intro-line"><StatusBadge status={currentStatus?.status ?? "unset"} />{blockingNoteWarnings && <span className="warning-badge">note 非対応要素あり</span>}</div>
             <h1>{article.title}</h1>
             <div className="transfer-mode" role="group" aria-label="コピーする本文形式">
               <span>本文の形式</span>
@@ -998,15 +1001,15 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
             </div>
             <div className="transfer-actions">
               {noteComposerOpened ? <button className="primary-button" type="button" onClick={() => copyWithoutOpeningNote("タイトル", article.title)}>タイトルをコピー</button> : <a className="primary-button" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer" onClick={(event) => copyAndOpenNote(event, "タイトル", article.title)}>タイトルをコピー</a>}
-              {noteComposerOpened ? <button className="secondary-button" type="button" disabled={transferMode === "note" && article.warningDetails.length > 0} onClick={() => copyWithoutOpeningNote(transferMode === "note" ? "note用本文" : "原文Markdown", transferMode === "note" ? article.body : article.sourceMarkdown)}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</button> : <a className="secondary-button" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer" aria-disabled={transferMode === "note" && article.warningDetails.length > 0} onClick={(event) => {
-                if (transferMode === "note" && article.warningDetails.length > 0) {
+              {noteComposerOpened ? <button className="secondary-button" type="button" disabled={transferMode === "note" && blockingNoteWarnings} onClick={() => copyWithoutOpeningNote(transferMode === "note" ? "note用本文" : "原文Markdown", transferMode === "note" ? article.body : article.sourceMarkdown)}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</button> : <a className="secondary-button" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer" aria-disabled={transferMode === "note" && blockingNoteWarnings} onClick={(event) => {
+                if (transferMode === "note" && blockingNoteWarnings) {
                   event.preventDefault();
                   return;
                 }
                 copyAndOpenNote(event, transferMode === "note" ? "note用本文" : "原文Markdown", transferMode === "note" ? article.body : article.sourceMarkdown);
               }}>{transferMode === "note" ? "note用本文をコピー" : "原文Markdownをコピー"}</a>}
             </div>
-            {transferMode === "note" && article.warningDetails.length > 0 && <p className="inline-message transfer-blocked" role="status">note用本文は要手動対応の要素があるためコピーできません。原文Markdownをコピーするか、下の対象を確認してください。</p>}
+            {transferMode === "note" && blockingNoteWarnings && <p className="inline-message transfer-blocked" role="status">note用本文は表やHTMLなど要手動対応の要素があるためコピーできません。原文Markdownをコピーするか、下の対象を確認してください。</p>}
             {message && <p className="inline-message" role="status">{message}</p>}
             {noteComposerOpened && <p className="inline-message" role="status">noteの執筆画面を開いたため、以降のコピーでは新しい執筆画面を開きません。noteアプリに戻って貼り付けてください。</p>}
             {manualCopy && <ManualCopy label={manualCopy.label} text={manualCopy.text} onClose={() => setManualCopy(null)} onOpenNote={manualCopy.openNoteAfterCopy ? openNote : undefined} />}
@@ -1062,6 +1065,17 @@ function ArticleScreen({ article, articleLoading, selectedPath, currentStatus, c
       )}
     </main>
   );
+}
+
+function writeNoteClipboard(article: ArticleContent, text: string): Promise<void> {
+  if (!article.noteHtml.includes("<img ") || !navigator.clipboard.write || typeof ClipboardItem === "undefined") {
+    return navigator.clipboard.writeText(text);
+  }
+  const item = new ClipboardItem({
+    "text/plain": new Blob([text], { type: "text/plain" }),
+    "text/html": new Blob([article.noteHtml], { type: "text/html" }),
+  });
+  return navigator.clipboard.write([item]);
 }
 
 function Accordion({ className, label, children, open: controlledOpen, onOpenChange }: { className: string; label: string; children: ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) {
