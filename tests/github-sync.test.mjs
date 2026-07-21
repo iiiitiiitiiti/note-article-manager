@@ -165,6 +165,43 @@ test("image preview keeps binary content as base64 instead of decoding it as UTF
   }
 });
 
+test("image preview falls back to the blob API when contents omits base64 for files over 1MB", async () => {
+  const originalFetch = globalThis.fetch;
+  const binaryImage = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 255, 0]);
+  const encodedImage = Buffer.from(binaryImage).toString("base64");
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    calls.push(value);
+    if (value.includes("/contents/")) return jsonResponse(200, { content: "", encoding: "none", sha: "large-sha", size: 1_500_000 });
+    if (value.endsWith("/git/blobs/large-sha")) return jsonResponse(200, { content: encodedImage, encoding: "base64", sha: "large-sha", size: 1_500_000 });
+    throw new Error(`unexpected request ${value}`);
+  };
+
+  try {
+    assert.equal(await new GithubClient("test-token").getImageDataUrl("design/images/large.png"), `data:image/png;base64,${encodedImage}`);
+    assert.ok(calls.some((value) => value.endsWith("/git/blobs/large-sha")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("image preview rejects files over the size limit without fetching the blob", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return jsonResponse(200, { content: "", encoding: "none", sha: "huge-sha", size: 6 * 1024 * 1024 });
+  };
+
+  try {
+    await assert.rejects(() => new GithubClient("test-token").getImageDataUrl("design/images/huge.png"), /大きすぎるためプレビューできません/);
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("image inventory distinguishes unreferenced files, broken links, and status-only paths", async () => {
   const originalFetch = globalThis.fetch;
   const article = "# One\n\n![broken](images/missing.png)\n";

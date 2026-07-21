@@ -28,6 +28,7 @@ interface ContentsResponse {
   content?: string;
   encoding?: string;
   sha: string;
+  size?: number;
 }
 
 interface TreeResponse {
@@ -114,10 +115,39 @@ export class GithubClient {
   }
 
   public async getImageDataUrl(path: string): Promise<string> {
-    const file = await this.getContentsFile(path, `画像「${path}」`);
-    const normalized = file.content.replace(/\s/g, "");
+    const operation = `画像「${path}」`;
+    const response = await this.request<ContentsResponse>(
+      `/repos/${OWNER}/${REPOSITORY}/contents/${encodePath(path)}?ref=${BRANCH}`,
+      {},
+      undefined,
+      [],
+      operation,
+    );
+    if (response.status !== 200 || !response.data.sha) throw new Error(`${operation}を取得できませんでした: ${path}`);
+    if (typeof response.data.size === "number" && response.data.size > MAX_IMAGE_BYTES) {
+      throw new Error(`画像が大きすぎるためプレビューできません: ${path}`);
+    }
+    // Contents API は 1MB 超のファイルに content を返さない（encoding: "none"）ため、Blobs API から取り直す
+    const content = response.data.content && response.data.encoding === "base64"
+      ? response.data.content
+      : await this.getBlobBase64(response.data.sha, operation, path);
+    const normalized = content.replace(/\s/g, "");
     if (normalized.length * 0.75 > MAX_IMAGE_BYTES) throw new Error(`画像が大きすぎるためプレビューできません: ${path}`);
     return `data:${mimeTypeForPath(path)};base64,${normalized}`;
+  }
+
+  private async getBlobBase64(sha: string, operation: string, path: string): Promise<string> {
+    const response = await this.request<ContentsResponse>(
+      `/repos/${OWNER}/${REPOSITORY}/git/blobs/${sha}`,
+      {},
+      undefined,
+      [],
+      operation,
+    );
+    if (response.status !== 200 || !response.data.content || response.data.encoding !== "base64") {
+      throw new Error(`${operation}を取得できませんでした: ${path}`);
+    }
+    return response.data.content;
   }
 
   private async getContentsFile(path: string, operation: string): Promise<{ content: string; sha: string }> {
