@@ -138,7 +138,8 @@ export function buildStatusDocument(repoRoot, previousDocument = null) {
       ? (disneyReviewStatuses.get(path) ?? "review")
       : "queued";
     const previous = previousDocument?.articles?.[path];
-    const status = previous?.status === "published" || previous?.status === "draft" ? previous.status : derivedStatus;
+    const keepsPreviousReview = previous?.status === "review" && !path.startsWith("disney/");
+    const status = previous?.status === "published" || previous?.status === "draft" || keepsPreviousReview ? previous.status : derivedStatus;
     const queueOrder = extractFilenameOrder(path);
     const title = extractArticleTitle(readFileSync(join(repoRoot, path), "utf8"));
     articles[path] = {

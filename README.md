@@ -45,7 +45,7 @@ node scripts/init-status.mjs \
   --repo /path/to/note-articles
 ```
 
-スクリプトは `README.md` の design キュー、各記事ファイルの接頭辞番号、`disney/IDEAS.md` のレビュー状態を照合します。`_docs/`、`assets/`、ルートの README、`disney/IDEAS.md` は記事として扱いません。既存の `published` と `draft` は再生成時も保持し、`queued`・`review`・`unset` は現在のルールから再計算します。既存の `status.json` は `--force` を指定しない限り上書きしません。
+スクリプトは `README.md` の design キュー、各記事ファイルの接頭辞番号、`disney/IDEAS.md` のレビュー状態を照合します。`_docs/`、`assets/`、ルートの README、`disney/IDEAS.md` は記事として扱いません。既存の `published` と `draft` は再生成時も保持します。`review` は disney では `disney/IDEAS.md` のマーカーから再計算し、他カテゴリでは既存の値を保持します（他カテゴリにはレビュー状態の正本となるファイルが無いため。公開待ちへ戻すのはアプリの記事詳細か `status.json` の編集で行います）。`queued`・`unset` は現在のルールから再計算します。既存の `status.json` は `--force` を指定しない限り上書きしません。
 
 画像タスクは `image-status.json` に保存されます。記事リポジトリへのpush時に自動再生成され、既存の判断と登録段階は保持されます。登録段階は「未開始／画像登録済み／本文差し込み済み／状態保存済み」で、GitHub Contents APIにトランザクションがないため途中状態が残る場合があります。その場合は記事詳細の復旧操作から続きを再試行してください。記事本文から参照されていない記事別画像は、一覧の「画像アセット管理」から削除候補として確認できます。削除は自動ではなく、Gitの履歴から復元できます。画像ファイルは5MB以下の PNG/JPEG/WebP/GIF を `カテゴリ/images/` に登録します。AI生成そのものはアプリ内で実行せず、生成用プロンプトのコピーまでを行います。連携方針は [AI画像生成連携の設計](docs/ai-image-generation-design.md) にまとめています。
 

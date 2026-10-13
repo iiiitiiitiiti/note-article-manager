@@ -76,6 +76,16 @@ test("buildStatusDocument initializes every article and preserves published stat
     publishedUrl: "https://note.com/example",
     publishedAt: "2026-07-18T00:00:00.000Z",
   });
+
+  const regenerated = buildStatusDocument(repoRoot, {
+    schemaVersion: 1,
+    articles: {
+      "design/01_one.md": { status: "review" },
+      "disney/01_one.md": { status: "review" },
+    },
+  }).articles;
+  assert.equal(regenerated["design/01_one.md"].status, "review", "disney 以外の review は保持する");
+  assert.equal(regenerated["disney/01_one.md"].status, "queued", "disney は IDEAS.md の通過を優先する");
 });
 
 test("image placeholders become stable tasks and preserve decisions", () => {
